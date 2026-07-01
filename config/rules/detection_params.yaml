@@ -52,6 +52,8 @@ rules:
   RECOG-006:
     # 変動対価の計上乖離（返品実績率に対する引当の乖離許容）
     variance_tolerance: 0.5
+    materiality: 0.1        # 返品率がこの水準未満なら発火しない（軽微な返品での過検出を防ぐ）
+    max_per_customer: 5     # 1得意先あたりの代表提示件数の上限
   RETURN-001:
     # 期末計上ロットの翌期返品率が全体平均の何倍を超えたら発火
     cohort_multiple: 2.0
@@ -81,6 +83,7 @@ rules:
     # ベンフォード適合度検定の有意水準（カイ二乗 p 値）と最小サンプル数
     p_value: 0.05
     min_sample: 300
+    max_flags: 25          # 母集団乖離時に提示する代表取引数の上限（過検出＝アラート疲れ対策）
   CREDIT-001:
     # 与信限度超過（credit_used + amount > credit_limit）は率の緩衝なし。例外承認で除外
     buffer_rate: 0.0

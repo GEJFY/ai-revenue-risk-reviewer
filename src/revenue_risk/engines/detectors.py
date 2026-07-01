@@ -354,19 +354,22 @@ def recog_005(ctx: Context) -> List[RuleHit]:
 def recog_006(ctx: Context) -> List[RuleHit]:
     """変動対価の未計上・過少（返品実績に対し引当が乖離）。"""
     tol = float(ctx.p("RECOG-006", "variance_tolerance", 0.5))
-    # 得意先別の実績返品率に対し、変動対価（discount_rate 等）が過少なら発火
+    # 実績返品率がこの水準未満なら発火しない（1件の返品で全取引を挙げる過検出を防ぐ・アラート疲れ対策）
+    materiality = float(ctx.p("RECOG-006", "materiality", 0.1))
+    max_per_customer = int(ctx.p("RECOG-006", "max_per_customer", 5))
     hits: List[RuleHit] = []
     for cid, txns in ctx.by_customer.items():
         n = len(txns)
         if n < 5:
             continue
         return_rate = sum(1 for t in txns if t.return_flag) / n
-        if return_rate <= 0:
+        if return_rate < materiality:  # 重要性の乏しい返品率は対象外
             continue
-        for t in txns:
-            provided = float(t.discount_rate or 0.0)
-            if provided < return_rate * (1 - tol):
-                hits.append(_hit("RECOG-006", t, f"得意先返品率{return_rate:.0%}に対し変動対価計上が過少"))
+        # 変動対価が返品実績に対し過少な取引を、代表として金額上位から数件のみ提示
+        under = [t for t in txns if float(t.discount_rate or 0.0) < return_rate * (1 - tol)]
+        under.sort(key=lambda t: abs(float(t.amount or 0)), reverse=True)
+        for t in under[:max_per_customer]:
+            hits.append(_hit("RECOG-006", t, f"得意先返品率{return_rate:.0%}に対し変動対価計上が過少"))
     return hits
 
 
@@ -537,14 +540,16 @@ def price_005(ctx: Context) -> List[RuleHit]:
     # 自由度8のカイ二乗の 0.05 臨界値 ≈ 15.51、0.01 ≈ 20.09
     critical = 15.51 if p_thr >= 0.05 else 20.09
     if chi2 > critical:
-        # 母集団レベルの兆候（補助指標）。代表として先頭桁が過剰な取引を数件フラグ
+        # 母集団レベルの兆候（補助指標）。χ² 検定は大標本で過検出になりやすいため、
+        # 全件を挙げずに、過剰な先頭桁を持つ取引の中から金額上位の代表 max_flags 件のみ提示する
+        # （アラート疲れ対策）。母集団特性の考慮が必要な補助指標として扱う。
+        max_flags = int(ctx.p("PRICE-005", "max_flags", 25))
         over_digit = int(np.argmax(observed - expected)) + 1
-        hits: List[RuleHit] = []
-        for t in ctx.transactions:
-            a = abs(float(t.amount or 0))
-            if a >= 1 and str(int(a))[0] == str(over_digit):
-                hits.append(_hit("PRICE-005", t, f"先頭桁分布がベンフォードから乖離(χ²={chi2:.1f})"))
-        return hits
+        cands = [t for t in ctx.transactions
+                 if abs(float(t.amount or 0)) >= 1 and str(int(abs(float(t.amount))))[0] == str(over_digit)]
+        cands.sort(key=lambda t: abs(float(t.amount or 0)), reverse=True)
+        return [_hit("PRICE-005", t, f"先頭桁{over_digit}が母集団で過剰（ベンフォード乖離 χ²={chi2:.1f}・補助指標）")
+                for t in cands[:max_flags]]
     return []
 
 

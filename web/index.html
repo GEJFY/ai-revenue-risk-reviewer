@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>売上・収益リスク分析 — 監査レビューコンソール（プロトタイプ）</title>
+  <meta name="description" content="売上・収益リスクを全件評価し、高リスク取引を財務諸表アサーションに紐づけて提示する監査レビューUIのプロトタイプ（合成データ・デモ）。" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- サイドバー -->
+    <aside class="sidebar" aria-label="ナビゲーション">
+      <div class="brand">
+        <div class="mark"><span class="logo" aria-hidden="true">RR</span>
+          <div><div class="title">Revenue Risk</div><div class="subtitle">監査レビューコンソール</div></div>
+        </div>
+      </div>
+      <nav class="nav" id="nav" aria-label="画面切替"></nav>
+      <div class="side-foot">
+        <div class="badge-engagement" id="engagementBadge" title="独立性の用途・配備の設定">—</div>
+        <p style="margin:10px 0 0;">プロトタイプ / 合成データ<br>独立性・ブランドの正式レビューが必要</p>
+      </div>
+    </aside>
+
+    <!-- メイン -->
+    <div class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">ダッシュボード</h1>
+          <div class="page-sub" id="pageSub"></div>
+        </div>
+        <div class="spacer"></div>
+        <span class="hitl-chip" title="Human-in-the-Loop">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a5 5 0 0 1 5 5c0 2-1 3-1 3M7 7a5 5 0 0 1 5-5M4 22a8 8 0 0 1 16 0"/></svg>
+          所見はAIの提示・確定は人間
+        </span>
+        <button class="btn primary" id="playDemoBtn" title="ナレーション付きの自動ガイドを再生">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          ガイド再生
+        </button>
+      </header>
+      <main class="content" id="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <!-- ガイドデモ用オーバーレイ -->
+  <div class="caption-progress" id="capProgress"></div>
+  <div id="cursor" aria-hidden="true">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffffff" stroke="#0c1523" stroke-width="1.2"><path d="M5 3l14 8-6 1.5L10 20 5 3z"/></svg>
+  </div>
+  <div class="caption-bar" id="captionBar" role="status" aria-live="polite">
+    <div class="cap-text" id="captionText"></div>
+    <div class="cap-controls">
+      <span class="cap-step" id="capStep"></span>
+      <button class="cap-btn" id="capPause" title="一時停止/再開" aria-label="一時停止/再開">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      </button>
+      <button class="cap-btn" id="capStop" title="終了" aria-label="ガイド終了">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <script src="data/data.js"></script>
+  <script src="app.js"></script>
+  <script src="demo.js"></script>
+</body>
+</html>
