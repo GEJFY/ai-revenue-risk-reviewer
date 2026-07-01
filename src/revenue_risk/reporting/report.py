@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -59,6 +60,22 @@ class ReportBundle:
 
 
 _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, None: 4}
+_SEV_JA = {"critical": "重大", "high": "高", "medium": "中", "low": "低"}
+_ASSERT_JA = {
+    "occurrence": "発生・実在性", "completeness": "網羅性", "accuracy": "正確性", "cutoff": "期間帰属",
+    "classification": "分類", "valuation": "評価", "rights_obligations": "権利と義務", "presentation": "表示・開示",
+}
+_TRACK_JA = {"track_a": "Track A（内部監査／監査役支援）", "track_b": "Track B（外部商用化／法定監査）"}
+_LAYER_JA = {"third_line": "第3線（検知・独立保証）", "second_line": "第2線（継続モニタリング）", "first_line": "第1線（現場・リアルタイム）"}
+
+
+def _clean_summary(s: str) -> str:
+    """要約を1文（先頭の根拠）に整え、ルールID接頭辞を外して簡潔にする。"""
+    seg = (s or "").split(" / ")[0].strip()
+    seg = re.sub(r"^\[[A-Za-z]+-\d+\]\s*", "", seg)
+    if len(seg) > 46:
+        seg = seg[:45] + "…"
+    return seg.replace("|", "／")
 
 
 class ReportBuilder:
@@ -171,7 +188,7 @@ class ReportBuilder:
             "独立した人間（監査人・監査役・経営者）が判断します（HITL）。\n"
         )
         lines.append("## 母集団と完全性")
-        lines.append(f"- 取引件数: **{pop['transaction_count']:,}** 件 / 売上合計: {pop['total_amount']:,.0f}")
+        lines.append(f"- 取引件数: **{pop['transaction_count']:,}** 件 / 売上合計: **¥{pop['total_amount']:,.0f}**")
         lines.append(f"- 対象期間: {', '.join(pop['period_coverage']) or 'n/a'}")
         recon = dq["reconciled_to_gl"]
         recon_txt = "突合済み" if recon else ("未突合/不一致あり" if dq["gl_reconciliation"] else "GL情報未提供")
@@ -190,30 +207,37 @@ class ReportBuilder:
             f"- 全 {fn.get('total', 0):,} 件を決定論的に評価し、高リスク **{fn.get('selected', 0):,}** 件"
             f"（{fn.get('selection_rate', 0):.1%}）をエージェント深掘り・人間レビュー対象に選別。"
         )
-        lines.append(f"- 重要度別: " + (", ".join(f"{k}={v}" for k, v in sev.items()) or "該当なし"))
+        sev_txt = " / ".join(f"{_SEV_JA.get(k, k)} {v}" for k, v in sev.items()) or "該当なし"
+        lines.append(f"- 重要度別: {sev_txt}")
         lines.append("")
         lines.append("## 主要な所見（重要度順・上位10）")
         lines.append("各所見は財務諸表アサーション（発生・網羅性・正確性・期間帰属 等）に紐づきます。\n")
         lines.append("| 所見ID | 重要度 | スコア | アサーション | 概要 |")
         lines.append("|---|---|---|---|---|")
         for f in list(findings)[:10]:
-            summary = f.rationale.get("summary_ja", "")[:60].replace("|", "／")
+            assertions = "、".join(_ASSERT_JA.get(a, a) for a in f.assertion) or "-"
             lines.append(
-                f"| {f.finding_id} | {f.severity or '-'} | {f.risk_score:.0f} | "
-                f"{', '.join(f.assertion) or '-'} | {summary} |"
+                f"| {f.finding_id} | {_SEV_JA.get(f.severity, f.severity or '-')} | {f.risk_score:.0f} | "
+                f"{assertions} | {_clean_summary(f.rationale.get('summary_ja', ''))} |"
             )
         if not findings:
             lines.append("| — | — | — | — | 高リスク所見は検出されませんでした |")
         lines.append("")
         cov = report["coverage"]
         if cov["disabled_rules"]:
+            named = "、".join(
+                f"{rid}（{self.catalog.rules[rid].name_ja}）" if rid in self.catalog.rules else rid
+                for rid in cov["disabled_rules"]
+            )
             lines.append(
                 f"> 注: プライバシー法的基盤が未充足のため、次のルールは無効化されています: "
-                f"{', '.join(cov['disabled_rules'])}（従業員/役職員データの取扱いは適法根拠が前提）。\n"
+                f"{named}（従業員/役職員データの取扱いは適法根拠が前提）。\n"
             )
         eng = report["metadata"]["engagement"]
+        track = _TRACK_JA.get(eng["track"], eng["track"])
+        layer = _LAYER_JA.get(eng["deployment_layer"], eng["deployment_layer"])
         lines.append(
-            f"> 独立性: track={eng['track']} / 配備={eng['deployment_layer']}。"
+            f"> 独立性: 利用主体 {track} ／ 配備 {layer}。"
             "売上不正は財務諸表不正であり、確定と是正の説明責任は独立した立場に置きます（要法務確認）。"
         )
         return "\n".join(lines) + "\n"

@@ -134,26 +134,44 @@
     if (st.timer) { clearTimeout(st.timer); st.timer = null; }
   }
 
-  async function runStep(i) {
-    if (!st.playing) return;
-    if (i >= STEPS.length) { finish(); return; }
-    st.idx = i;
+  // 1ステップの視覚セットアップ（遷移・スクロール・カーソル・ハイライト・字幕・アクション）。
+  // 音声・自動送りは含まない。runStep（自動再生）と showStep（録画用）が共有する。
+  async function applyStep(i, opt) {
+    opt = opt || {};
     const step = STEPS[i];
+    st.idx = i;
     RRR().navigate(step.route, step.param);
     await sleep(reduced ? 60 : 420);          // 描画待ち
     const el = document.querySelector(step.target);
     if (el) {
-      el.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+      el.scrollIntoView({ behavior: (reduced || opt.instant) ? "auto" : "smooth", block: "center" });
       await sleep(reduced ? 20 : 320);
       moveCursor(el);
       highlight(el);
     }
     showCaption(step.text, i);
     if (typeof step.action === "function") { await sleep(reduced ? 0 : 900); try { step.action(); } catch (e) { } }
-    await speak(step);
+  }
+
+  async function runStep(i) {
+    if (!st.playing) return;
+    if (i >= STEPS.length) { finish(); return; }
+    await applyStep(i);
+    await speak(STEPS[i]);
     if (st.playing && !st.paused) runStep(i + 1);
   }
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  // 録画用: 音声・自動送りなしで指定ステップの静止状態を作る。
+  async function showStep(i) {
+    st.playing = true; st.paused = true;   // 自動送りを止めた状態で表示だけ行う
+    document.body.classList.add("demo-running");
+    setPauseIcon(false);
+    bar.classList.add("on");
+    if (cursor) cursor.classList.add("on");
+    await applyStep(i, { instant: false });
+    return true;
+  }
 
   function start() {
     if (st.playing) return;
@@ -212,5 +230,9 @@
     if (/[?&]demo=1/.test(location.search)) setTimeout(start, 600);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire); else wire();
-  window.RRR_DEMO = { start, stop, togglePause };
+  window.RRR_DEMO = {
+    start, stop, togglePause, showStep,
+    stepCount: () => STEPS.length,
+    steps: () => STEPS.map((s) => ({ id: s.id, text: s.text })),
+  };
 })();
