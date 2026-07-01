@@ -1,0 +1,855 @@
+# 売上リスク分析 ルールカタログ
+#
+# schema (各ルール):
+#   id: カテゴリ接頭辞 + 連番（一意）
+#   category: 下記カテゴリコード
+#   name_ja: ルール名
+#   description_ja: 検知内容
+#   assertion: リスクに晒される財務諸表アサーション（occurrence/completeness/accuracy/cutoff/classification/valuation/rights_obligations/presentation）
+#   severity: low | medium | high | critical
+#   base_weight: リスクスコアへの基礎重み（0-40）
+#   detection_ja: 検知ロジックの要点（実装の指針。決定論的に評価可能なもの）
+#   applies_to: 適用対象（transaction / customer / entity_network / journal / salesperson 等）
+#   false_positive_notes_ja: 誤検知の典型と正当な業務理由（必須。アラート疲れ対策）
+#   hitl: この所見に人間の確認が必須か
+#   references: 関連基準・法令
+#
+# カテゴリ:
+#   CUTOFF 期間帰属・カットオフ / FICT 架空売上・実在性 / CIRC 循環取引・関連当事者 /
+#   RECOG 収益認識 / RETURN 返品・赤伝・変動対価 / PRICE 価格・数量・粗利 /
+#   CREDIT 与信・回収可能性 / CUST 得意先マスタ・スクリーニング / CTRL 統制・承認・職務分掌 /
+#   JE 仕訳・トップサイド調整（統制無効化） / PATT パターン・集中・行動 / COMPL コンプライアンス
+
+version: "1.0"
+domain: revenue
+
+rules:
+
+  # ===== CUTOFF: 期間帰属・カットオフ =====
+  - id: CUTOFF-001
+    category: CUTOFF
+    name_ja: 期末駆け込み計上の集中
+    description_ja: 期末最終数営業日に売上計上が異常に集中している
+    assertion: [cutoff, occurrence]
+    severity: high
+    base_weight: 22
+    detection_ja: 期末最終N営業日の計上件数・金額が、当期の日次平均や過去同期比で統計的に突出
+    applies_to: transaction
+    false_positive_notes_ja: 月末・期末に締める商習慣、季節性商材、期末納期の大型案件では正当に集中しうる。季節性・過去趨勢で調整して評価する
+    hitl: true
+    references: [監基報240, 収益認識基準]
+  - id: CUTOFF-002
+    category: CUTOFF
+    name_ja: 未出荷・出荷前の収益認識
+    description_ja: 出荷日が収益認識日より後（または出荷記録なし）で計上されている
+    assertion: [cutoff, occurrence]
+    severity: critical
+    base_weight: 34
+    detection_ja: ship_date > revenue_recognition_date、または ship_date 欠落かつ point_in_time 認識
+    applies_to: transaction
+    false_positive_notes_ja: サービス・ライセンス・一定期間履行義務など出荷概念が無い取引では出荷日欠落が正常。取引形態（channel/performance_obligation_status）で除外する
+    hitl: true
+    references: [収益認識基準, 監基報240]
+  - id: CUTOFF-003
+    category: CUTOFF
+    name_ja: 検収前計上（支配移転前）
+    description_ja: 納品・検収日より前に収益を認識している
+    assertion: [cutoff, occurrence]
+    severity: high
+    base_weight: 24
+    detection_ja: delivery_date > revenue_recognition_date、かつ検収基準の契約
+    applies_to: transaction
+    false_positive_notes_ja: 出荷基準を正当に採用する取引、着荷主義でない契約では乖離が正常。契約上の収益認識時点の定義に照らす
+    hitl: true
+    references: [収益認識基準]
+  - id: CUTOFF-004
+    category: CUTOFF
+    name_ja: 期末計上→翌期取消・返品
+    description_ja: 期末に計上した売上が翌期早々に取り消し・返品されている
+    assertion: [cutoff, occurrence]
+    severity: high
+    base_weight: 28
+    detection_ja: 期末N日以内計上 かつ reversal_date/credit_memo が翌期初M日以内
+    applies_to: transaction
+    false_positive_notes_ja: 通常の品質不良・数量違いによる返品も一定率発生する。翌期返品率の水準・特定得意先への集中の有無で判断する
+    hitl: true
+    references: [監基報240]
+  - id: CUTOFF-005
+    category: CUTOFF
+    name_ja: 帳簿の締め遅延（決算日後計上）
+    description_ja: 決算日を過ぎた日付処理で当期に売上を計上している（post-close entries）
+    assertion: [cutoff, completeness]
+    severity: high
+    base_weight: 24
+    detection_ja: entry/posting timestamp が決算日以降、かつ会計期間が当期
+    applies_to: journal
+    false_positive_notes_ja: 決算整理・正当な締め後修正は存在する。承認・根拠証憑の有無、金額規模で切り分ける
+    hitl: true
+    references: [監基報240, J-SOX販売プロセス]
+  - id: CUTOFF-006
+    category: CUTOFF
+    name_ja: 期末月売上の異常増
+    description_ja: 期末月の売上が季節性調整後トレンドから大きく上振れ
+    assertion: [cutoff]
+    severity: medium
+    base_weight: 14
+    detection_ja: 季節性・趨勢モデルの予測区間を超える期末月売上
+    applies_to: transaction
+    false_positive_notes_ja: 新製品投入・大型受注・キャンペーンなど実需による増加もある。要因分解して実態と照合
+    hitl: true
+    references: [監基報240]
+
+  # ===== FICT: 架空売上・実在性 =====
+  - id: FICT-001
+    category: FICT
+    name_ja: 出荷・納品証憑のない売上
+    description_ja: 物品取引でありながら出荷・納品の証憑が存在しない売上
+    assertion: [occurrence]
+    severity: critical
+    base_weight: 34
+    detection_ja: 物品 channel かつ shipment/delivery 記録が全欠落、外部出荷確認も取れない
+    applies_to: transaction
+    false_positive_notes_ja: 役務・デジタル財・現地引渡など出荷記録が本来無い取引を除外。データ連携漏れの可能性も切り分ける
+    hitl: true
+    references: [監基報240]
+  - id: FICT-002
+    category: FICT
+    name_ja: 新設・初回取引先への高額売上
+    description_ja: 設立直後または初回取引の得意先に対する高額計上
+    assertion: [occurrence]
+    severity: high
+    base_weight: 24
+    detection_ja: 得意先マスタ登録から短期間 かつ 取引金額が上位分位
+    applies_to: transaction
+    false_positive_notes_ja: 正当な新規大口顧客の獲得は通常業務。与信審査・契約・入金実績の有無で補強評価する
+    hitl: true
+    references: [監基報240, ACFE]
+  - id: FICT-003
+    category: FICT
+    name_ja: 入金実績のない売上
+    description_ja: 計上後、相当期間を経ても対応する入金が確認できない
+    assertion: [occurrence, valuation]
+    severity: high
+    base_weight: 26
+    detection_ja: revenue_recognition_date から X 日超で対応入金なし（bank_receipt 未突合）
+    applies_to: transaction
+    false_positive_notes_ja: 長期支払サイト・前受・相殺決済・手形では入金遅延が正常。支払条件と決済方法を織り込む
+    hitl: true
+    references: [監基報240]
+  - id: FICT-004
+    category: FICT
+    name_ja: bill-and-hold（請求済・出荷保留）
+    description_ja: 請求・計上済だが物品を出荷せず自社等で保管している
+    assertion: [occurrence, cutoff]
+    severity: high
+    base_weight: 24
+    detection_ja: invoice/計上あり かつ ship_date 未到来・保管フラグ
+    applies_to: transaction
+    false_positive_notes_ja: 顧客要請による正当な bill-and-hold は要件充足で認識可能。契約・顧客依頼・区分保管の証憑で判断する
+    hitl: true
+    references: [収益認識基準, 監基報240]
+  - id: FICT-005
+    category: FICT
+    name_ja: 期末一括・以降取引消滅
+    description_ja: 特定得意先に期末一括大口計上後、以降の取引が途絶える
+    assertion: [occurrence]
+    severity: medium
+    base_weight: 16
+    detection_ja: 期末大口計上 かつ 翌期以降の取引継続なし
+    applies_to: transaction
+    false_positive_notes_ja: スポット・単発プロジェクトでは正常。取引の性質・契約範囲を確認
+    hitl: true
+    references: [ACFE]
+  - id: FICT-006
+    category: FICT
+    name_ja: 受注・出荷・請求の三点不整合
+    description_ja: 受注／出荷／請求のいずれかが欠落したまま計上されている
+    assertion: [occurrence, accuracy]
+    severity: high
+    base_weight: 22
+    detection_ja: order/shipment/invoice のリンクが不完全（three-way不成立）
+    applies_to: transaction
+    false_positive_notes_ja: 業態により受注レス（店頭・EC即時）等は正常。プロセス定義に照らして必須書類を特定する
+    hitl: true
+    references: [J-SOX販売プロセス]
+
+  # ===== CIRC: 循環取引・関連当事者 =====
+  - id: CIRC-001
+    category: CIRC
+    name_ja: 関連当事者取引の価格乖離
+    description_ja: 関連当事者・グループ内取引で市場価格から著しく乖離
+    assertion: [accuracy, presentation]
+    severity: high
+    base_weight: 24
+    detection_ja: related_party_flag かつ 単価/粗利が第三者取引の分布から乖離
+    applies_to: transaction
+    false_positive_notes_ja: グループ内の正当な価格政策・移転価格ポリシーに基づく差はありうる。ポリシー・独立企業間価格の根拠で評価
+    hitl: true
+    references: [会社法関連当事者, 移転価格]
+  - id: CIRC-002
+    category: CIRC
+    name_ja: 仕入先と得意先の同一性
+    description_ja: 同一相手が仕入先かつ得意先（買戻し・還流の兆候）
+    assertion: [occurrence, presentation]
+    severity: high
+    base_weight: 26
+    detection_ja: 取引相手が売上・仕入の双方に出現し、金額・時期が相殺的
+    applies_to: entity_network
+    false_positive_notes_ja: 相互取引が正当な業態（相互OEM等）もある。経済的実体・独立の意思決定の有無を確認
+    hitl: true
+    references: [監基報240]
+  - id: CIRC-003
+    category: CIRC
+    name_ja: 資金の循環的還流
+    description_ja: 短期間で売上・仕入・入出金が環流し実体資金移動が相殺される
+    assertion: [occurrence]
+    severity: critical
+    base_weight: 36
+    detection_ja: 取引・資金フローの時系列が閉路を成し、ネット資金移動が僅少
+    applies_to: entity_network
+    false_positive_notes_ja: 正当なネッティング決済と区別が必要。取引ごとの財・役務の実在と経済合理性を検証する
+    hitl: true
+    references: [監基報240, 金商法]
+  - id: CIRC-004
+    category: CIRC
+    name_ja: 実体の乏しい介在業者（スルー取引）
+    description_ja: 付加価値の不明な業者を経由するin-out取引
+    assertion: [occurrence, classification]
+    severity: high
+    base_weight: 24
+    detection_ja: 介在業者で入出荷が同一・粗利僅少・短期反転
+    applies_to: entity_network
+    false_positive_notes_ja: 商社・物流の正当な介在もある。介在の機能・リスク負担・付加価値を確認
+    hitl: true
+    references: [監基報240]
+  - id: CIRC-005
+    category: CIRC
+    name_ja: 関連当事者取引の未開示
+    description_ja: 開示閾値を超える関連当事者取引が開示されていない
+    assertion: [presentation]
+    severity: high
+    base_weight: 22
+    detection_ja: related_party_flag かつ 累計金額が開示基準超で開示リストに不在
+    applies_to: customer
+    false_positive_notes_ja: 関連当事者判定・重要性の解釈差はありうる。定義と基準への当てはめを確認
+    hitl: true
+    references: [会社法関連当事者, 金商法]
+  - id: CIRC-006
+    category: CIRC
+    name_ja: 取引ネットワークの循環経路
+    description_ja: エンティティ間の取引グラフに循環的な経路が存在
+    assertion: [occurrence]
+    severity: critical
+    base_weight: 34
+    detection_ja: entity 取引グラフでサイクル検出（A→B→C→A 等）、金額整合を伴う
+    applies_to: entity_network
+    false_positive_notes_ja: サプライチェーン上の正当な循環（相互供給）もある。各エッジの財・役務の実在で裏取りする
+    hitl: true
+    references: [監基報240]
+
+  # ===== RECOG: 収益認識 =====
+  - id: RECOG-001
+    category: RECOG
+    name_ja: 履行義務未充足での前倒し認識
+    description_ja: 支配移転前・履行義務未充足の段階で収益を認識
+    assertion: [occurrence, cutoff]
+    severity: high
+    base_weight: 26
+    detection_ja: performance_obligation_status = not_satisfied で認識、または充足指標より前
+    applies_to: transaction
+    false_positive_notes_ja: 一時点/一定期間の判定や支配移転時点の解釈は契約次第。契約条件に照らして評価する
+    hitl: true
+    references: [収益認識基準]
+  - id: RECOG-002
+    category: RECOG
+    name_ja: 総額・純額の誤り（本人・代理人）
+    description_ja: 代理人取引を総額計上しトップラインを水増し
+    assertion: [accuracy, presentation]
+    severity: high
+    base_weight: 24
+    detection_ja: gross_net_indicator = agent かつ 総額計上、または支配の指標と不整合
+    applies_to: transaction
+    false_positive_notes_ja: 本人/代理人の判定は支配の有無に依存し判断を伴う。指標（在庫リスク・価格裁量等）で検討
+    hitl: true
+    references: [収益認識基準]
+  - id: RECOG-003
+    category: RECOG
+    name_ja: 進捗度の操作（一定期間履行義務）
+    description_ja: 進捗度・原価見積りの改訂により収益を恣意的に前倒し
+    assertion: [accuracy, cutoff]
+    severity: high
+    base_weight: 26
+    detection_ja: over_time 案件で進捗率が急変、または見積総原価の下方改訂→利益前倒し
+    applies_to: transaction
+    false_positive_notes_ja: 見積りは合理的に改訂される。改訂の根拠・タイミング・反復性で判断（旧・工事進行基準の論点）
+    hitl: true
+    references: [収益認識基準, 監基報240]
+  - id: RECOG-004
+    category: RECOG
+    name_ja: 委託・消化仕入を通常売上計上
+    description_ja: 委託販売・消化仕入取引を自己の通常売上として計上
+    assertion: [occurrence, classification]
+    severity: high
+    base_weight: 22
+    detection_ja: channel = consignment/agent だが通常売上勘定に総額計上
+    applies_to: transaction
+    false_positive_notes_ja: 契約実態が買取であれば通常売上が正しい。契約上の在庫リスク移転の有無で判定
+    hitl: true
+    references: [収益認識基準]
+  - id: RECOG-005
+    category: RECOG
+    name_ja: 複数履行義務への配分欠如
+    description_ja: 複数の履行義務を含む契約で取引価格の配分がされていない
+    assertion: [accuracy]
+    severity: medium
+    base_weight: 14
+    detection_ja: 単一計上だが契約が複数履行義務（物品＋保守等）を含む
+    applies_to: transaction
+    false_positive_notes_ja: 重要性が乏しい場合や単一履行義務なら配分不要。契約の分解可能性を確認
+    hitl: true
+    references: [収益認識基準]
+  - id: RECOG-006
+    category: RECOG
+    name_ja: 変動対価の未計上・過少
+    description_ja: 返品・リベート等の変動対価を見積計上していない/過少
+    assertion: [valuation, completeness]
+    severity: medium
+    base_weight: 16
+    detection_ja: 返品・値引の実績率に対し、変動対価の計上が乖離
+    applies_to: transaction
+    false_positive_notes_ja: 変動対価の見積りには不確実性がある。見積手法・過去実績との整合を確認
+    hitl: true
+    references: [収益認識基準]
+
+  # ===== RETURN: 返品・赤伝・変動対価 =====
+  - id: RETURN-001
+    category: RETURN
+    name_ja: 期末売上への翌期高返品（押し込み）
+    description_ja: 期末計上分に対する翌期の返品率が異常に高い（チャネルスタッフィング）
+    assertion: [occurrence, cutoff]
+    severity: high
+    base_weight: 28
+    detection_ja: 期末計上ロットの翌期返品率が全体平均を大きく上回る
+    applies_to: transaction
+    false_positive_notes_ja: 季節商材の想定内返品もある。得意先・製品別の集中と水準で押し込みと切り分ける
+    hitl: true
+    references: [監基報240]
+  - id: RETURN-002
+    category: RETURN
+    name_ja: 赤伝・値引の期ずれ計上
+    description_ja: 当期に発生した返品・値引を翌期に繰り延べ計上
+    assertion: [cutoff, completeness]
+    severity: high
+    base_weight: 24
+    detection_ja: 返品・値引の発生日と計上日の期またぎ乖離
+    applies_to: transaction
+    false_positive_notes_ja: 事務処理のタイムラグは一定発生する。金額規模・反復性・期末集中で判断
+    hitl: true
+    references: [監基報240]
+  - id: RETURN-003
+    category: RETURN
+    name_ja: 特定得意先の異常返品率
+    description_ja: 特定得意先の返品率が突出
+    assertion: [valuation]
+    severity: medium
+    base_weight: 14
+    detection_ja: 得意先別返品率が分布の外れ値
+    applies_to: customer
+    false_positive_notes_ja: 品質問題・業態要因（EC等）で高返品率が正常な先もある。原因を確認
+    hitl: false
+    references: [ACFE]
+  - id: RETURN-004
+    category: RETURN
+    name_ja: リベート・値引の急増/マスタ逸脱
+    description_ja: 売上値引・リベートが急増、または契約・マスタの条件から逸脱
+    assertion: [accuracy, valuation]
+    severity: medium
+    base_weight: 16
+    detection_ja: 値引率がマスタ/契約条件超、または時系列で急増
+    applies_to: transaction
+    false_positive_notes_ja: 販促・数量リベートの正当な変動がある。契約・承認との整合で判断
+    hitl: true
+    references: [J-SOX販売プロセス]
+  - id: RETURN-005
+    category: RETURN
+    name_ja: 返品権付き取引（裏契約）の疑い
+    description_ja: 契約書に無い返品権・取消権を伴う疑いのある取引
+    assertion: [occurrence, valuation]
+    severity: high
+    base_weight: 24
+    detection_ja: 通信・付随合意に返品/取消条項の示唆、正式契約と不整合
+    applies_to: transaction
+    false_positive_notes_ja: 正当な返品ポリシーの範囲内なら問題ない。サイドレターの実在・拘束力を検証
+    hitl: true
+    references: [監基報240, 収益認識基準]
+
+  # ===== PRICE: 価格・数量・粗利 =====
+  - id: PRICE-001
+    category: PRICE
+    name_ja: 単価のマスタ乖離
+    description_ja: 適用単価が価格マスタ・価格表から乖離
+    assertion: [accuracy]
+    severity: medium
+    base_weight: 14
+    detection_ja: unit_price がマスタ許容レンジ外
+    applies_to: transaction
+    false_positive_notes_ja: 個別見積・スポット価格・為替は正当に乖離する。承認・見積根拠を確認
+    hitl: false
+    references: [J-SOX販売プロセス]
+  - id: PRICE-002
+    category: PRICE
+    name_ja: 数量の異常
+    description_ja: 数量がマイナス・桁外れ・不自然な丸め
+    assertion: [accuracy]
+    severity: medium
+    base_weight: 12
+    detection_ja: quantity の外れ値・負値・過度な丸め
+    applies_to: transaction
+    false_positive_notes_ja: 訂正伝票・単位差（ロット/ケース）で説明可能な場合がある。単位定義を確認
+    hitl: false
+    references: [J-SOX販売プロセス]
+  - id: PRICE-003
+    category: PRICE
+    name_ja: 異常な粗利率
+    description_ja: 取引・得意先・製品の粗利率が異常（過大/過小）
+    assertion: [valuation, accuracy]
+    severity: high
+    base_weight: 22
+    detection_ja: 粗利率が製品/得意先クラスタの分布から乖離
+    applies_to: transaction
+    false_positive_notes_ja: ミックス変化・特価・原価配賦の差で変動する。原価計算方法と併せ評価
+    hitl: true
+    references: [監基報240]
+  - id: PRICE-004
+    category: PRICE
+    name_ja: 承認外の大幅値引
+    description_ja: 通常権限を超える値引が承認記録なく適用
+    assertion: [accuracy]
+    severity: medium
+    base_weight: 14
+    detection_ja: 値引率が権限テーブル超 かつ 承認レコードなし
+    applies_to: transaction
+    false_positive_notes_ja: 承認データ未連携の可能性。承認経路の記録源を確認
+    hitl: true
+    references: [J-SOX販売プロセス]
+  - id: PRICE-005
+    category: PRICE
+    name_ja: 金額分布のベンフォード乖離
+    description_ja: 請求金額の先頭桁分布がベンフォードの法則から有意に乖離
+    assertion: [accuracy, occurrence]
+    severity: medium
+    base_weight: 12
+    detection_ja: 先頭桁分布の適合度検定が有意
+    applies_to: transaction
+    false_positive_notes_ja: 定価・価格帯が限定される商材では自然に乖離する。母集団特性を踏まえ補助指標として扱う
+    hitl: false
+    references: [ACFE]
+
+  # ===== CREDIT: 与信・回収可能性 =====
+  - id: CREDIT-001
+    category: CREDIT
+    name_ja: 与信限度超過の売上
+    description_ja: 与信限度を超える売上が承認なく計上
+    assertion: [valuation, rights_obligations]
+    severity: high
+    base_weight: 22
+    detection_ja: credit_used + amount > credit_limit かつ 例外承認なし
+    applies_to: transaction
+    false_positive_notes_ja: 一時的超過の正当承認や保証・保険付き取引はリスクが低い。承認・保全の有無を確認
+    hitl: true
+    references: [J-SOX販売プロセス]
+  - id: CREDIT-002
+    category: CREDIT
+    name_ja: 得意先別DSOの急増
+    description_ja: 売上債権回転日数（DSO）が得意先別に急増
+    assertion: [valuation]
+    severity: high
+    base_weight: 22
+    detection_ja: 得意先別 DSO の時系列上昇が閾値超
+    applies_to: customer
+    false_positive_notes_ja: 支払条件変更・季節性で変動する。条件変更履歴と併せて評価
+    hitl: true
+    references: [監基報240]
+  - id: CREDIT-003
+    category: CREDIT
+    name_ja: 回収懸念先への売上増
+    description_ja: 信用不安のある相手への売上が増加
+    assertion: [valuation]
+    severity: high
+    base_weight: 22
+    detection_ja: 外部信用情報の悪化 と 売上増が同時
+    applies_to: customer
+    false_positive_notes_ja: 保全・前受・保証で回収リスクを低減している場合がある。信用補完の有無を確認
+    hitl: true
+    references: [監基報240]
+  - id: CREDIT-004
+    category: CREDIT
+    name_ja: 支払条件の異常延長
+    description_ja: 支払サイトが通常から大きく延長された取引
+    assertion: [valuation, cutoff]
+    severity: medium
+    base_weight: 16
+    detection_ja: payment_terms_days が得意先/業界標準を大きく超過
+    applies_to: transaction
+    false_positive_notes_ja: 大型案件・戦略取引で正当な延長もある。承認と背景を確認（押し込みの兆候にもなる）
+    hitl: true
+    references: [監基報240]
+  - id: CREDIT-005
+    category: CREDIT
+    name_ja: 長期滞留債権に対応する売上
+    description_ja: 長期滞留・貸倒懸念のある売掛金に対応する売上
+    assertion: [valuation]
+    severity: medium
+    base_weight: 16
+    detection_ja: 対応ARが長期滞留区分 かつ 貸倒引当と不整合
+    applies_to: transaction
+    false_positive_notes_ja: 係争・検収保留など正当な滞留がある。滞留理由と引当方針を確認
+    hitl: true
+    references: [監基報240]
+
+  # ===== CUST: 得意先マスタ・スクリーニング =====
+  - id: CUST-001
+    category: CUST
+    name_ja: 反社・制裁該当の得意先
+    description_ja: 反社会的勢力・制裁リストに該当する得意先との取引
+    assertion: [occurrence, presentation]
+    severity: critical
+    base_weight: 38
+    detection_ja: 得意先が反社/制裁/PEP等のスクリーニングにヒット
+    applies_to: customer
+    false_positive_notes_ja: 同名異人・表記揺れによる誤ヒットがある。属性照合で確度を上げ、確定は人間が判断
+    hitl: true
+    references: [反社対応, 外為法, AML]
+  - id: CUST-002
+    category: CUST
+    name_ja: 得意先マスタの不審変更
+    description_ja: 振込先・住所等が取引直前に不審に変更された
+    assertion: [occurrence, accuracy]
+    severity: high
+    base_weight: 22
+    detection_ja: master 変更（口座/住所）と直後の高額取引が近接
+    applies_to: customer
+    false_positive_notes_ja: 正当な移転・口座変更はある。変更申請・証憑・承認の有無を確認
+    hitl: true
+    references: [J-SOX販売プロセス, AML]
+  - id: CUST-003
+    category: CUST
+    name_ja: 実在性の疑わしい得意先
+    description_ja: 登記・所在確認の取れない得意先
+    assertion: [occurrence]
+    severity: high
+    base_weight: 24
+    detection_ja: 法人登記/所在の外部確認が取れない、連絡先が不自然
+    applies_to: customer
+    false_positive_notes_ja: 個人事業主・海外先・新設で公開情報が乏しい場合がある。複数ソースで確認
+    hitl: true
+    references: [監基報240, AML]
+  - id: CUST-004
+    category: CUST
+    name_ja: 得意先集中の急変
+    description_ja: 特定得意先への売上依存が急激に高まる
+    assertion: [presentation, valuation]
+    severity: medium
+    base_weight: 14
+    detection_ja: 上位得意先の売上構成比が急上昇
+    applies_to: customer
+    false_positive_notes_ja: 大口契約獲得による正当な集中もある。取引実体と継続性を確認
+    hitl: false
+    references: [監基報240]
+  - id: CUST-005
+    category: CUST
+    name_ja: 役職員と関係のある得意先
+    description_ja: 自社の役員・従業員と関係のある得意先（利益相反）
+    assertion: [occurrence, presentation]
+    severity: high
+    base_weight: 22
+    detection_ja: 得意先属性と役職員情報の関連（住所/氏名/資本関係）
+    applies_to: customer
+    false_positive_notes_ja: 偶然の一致がある。関係性の実在と利益相反の重要性を確認（プライバシー配慮のうえ）
+    hitl: true
+    references: [会社法利益相反, 会社法関連当事者]
+
+  # ===== CTRL: 統制・承認・職務分掌 =====
+  - id: CTRL-001
+    category: CTRL
+    name_ja: 販売プロセスの職務分掌違反
+    description_ja: 受注・出荷・請求・入金・与信のうち複数を同一者が実行
+    assertion: [occurrence, accuracy]
+    severity: high
+    base_weight: 22
+    detection_ja: 同一 user_id が相反する複数職務を実施
+    applies_to: transaction
+    false_positive_notes_ja: 小規模拠点では兼務が不可避なことがある。代替統制の有無を確認
+    hitl: true
+    references: [J-SOX販売プロセス, COSO]
+  - id: CTRL-002
+    category: CTRL
+    name_ja: 承認のない売上・価格・与信
+    description_ja: 必要な承認記録なく計上・価格設定・与信付与
+    assertion: [occurrence, accuracy]
+    severity: high
+    base_weight: 22
+    detection_ja: 承認必須プロセスで approver_id 欠落
+    applies_to: transaction
+    false_positive_notes_ja: 承認データ未連携の可能性。承認記録の源泉を確認
+    hitl: true
+    references: [J-SOX販売プロセス]
+  - id: CTRL-003
+    category: CTRL
+    name_ja: マスタ変更統制の不備
+    description_ja: 得意先/価格マスタの変更者が同一取引の起票者
+    assertion: [accuracy, occurrence]
+    severity: medium
+    base_weight: 16
+    detection_ja: master 変更者 = 当該取引の起票/承認者
+    applies_to: transaction
+    false_positive_notes_ja: 兼務環境では発生しうる。変更承認・モニタリングの代替統制を確認
+    hitl: true
+    references: [J-SOX販売プロセス]
+  - id: CTRL-004
+    category: CTRL
+    name_ja: 三点照合の不一致
+    description_ja: 注文・出荷・請求の数量/金額が一致しない
+    assertion: [accuracy, occurrence]
+    severity: high
+    base_weight: 20
+    detection_ja: order/shipment/invoice 間の数量・金額の不一致
+    applies_to: transaction
+    false_positive_notes_ja: 分割納品・一部出荷では正当に不一致となる。突合単位を合わせて評価
+    hitl: true
+    references: [J-SOX販売プロセス]
+  - id: CTRL-005
+    category: CTRL
+    name_ja: 限度のオーバーライド
+    description_ja: 与信限度・値引限度がシステム上でオーバーライドされた
+    assertion: [accuracy]
+    severity: medium
+    base_weight: 14
+    detection_ja: システムの限度超過フラグ＋上長オーバーライド記録
+    applies_to: transaction
+    false_positive_notes_ja: 正当な例外承認プロセスの範囲内かを確認。頻度・集中で判断
+    hitl: true
+    references: [J-SOX販売プロセス]
+
+  # ===== JE: 仕訳・トップサイド調整（統制無効化） =====
+  - id: JE-001
+    category: JE
+    name_ja: 売上勘定への手動仕訳
+    description_ja: システム外の手動仕訳で売上を計上（トップサイド）
+    assertion: [occurrence, accuracy]
+    severity: high
+    base_weight: 24
+    detection_ja: source_system = manual かつ 売上勘定を貸方計上
+    applies_to: journal
+    false_positive_notes_ja: 正当な決算整理・組替もある。根拠証憑・承認・反復性で切り分ける
+    hitl: true
+    references: [監基報240]
+  - id: JE-002
+    category: JE
+    name_ja: 期末・決算直近の売上手動仕訳
+    description_ja: 決算日直近に手動計上された売上仕訳
+    assertion: [cutoff, occurrence]
+    severity: high
+    base_weight: 26
+    detection_ja: manual 売上仕訳 かつ 計上日が決算日近接
+    applies_to: journal
+    false_positive_notes_ja: 締め処理上の正当な期末仕訳がある。承認・証憑の有無で判断
+    hitl: true
+    references: [監基報240]
+  - id: JE-003
+    category: JE
+    name_ja: 経営者・上位者による売上調整仕訳
+    description_ja: 通常起票者でない上位職位が売上を調整
+    assertion: [occurrence, accuracy]
+    severity: high
+    base_weight: 26
+    detection_ja: 起票者が経営者/管理職 かつ 売上調整、通常権限外
+    applies_to: journal
+    false_positive_notes_ja: 正当な管理職関与もある。役割・根拠・承認の適切性を確認（統制無効化の兆候）
+    hitl: true
+    references: [監基報240, COSO]
+  - id: JE-004
+    category: JE
+    name_ja: 異例な勘定組合せ
+    description_ja: 売上の相手勘定が通常と異なる（不自然な相手勘定）
+    assertion: [classification, occurrence]
+    severity: medium
+    base_weight: 16
+    detection_ja: 売上仕訳の相手勘定が過去分布から逸脱
+    applies_to: journal
+    false_positive_notes_ja: 新規取引形態で正当に新しい組合せが出る。取引内容と勘定設定を確認
+    hitl: true
+    references: [監基報240]
+  - id: JE-005
+    category: JE
+    name_ja: バックデート・丸め・閾値直下
+    description_ja: 過去日付、丸め数値、承認閾値の直下に張り付く仕訳
+    assertion: [occurrence, accuracy]
+    severity: medium
+    base_weight: 16
+    detection_ja: 入力日<計上日、極端な丸め、閾値直下への集中
+    applies_to: journal
+    false_positive_notes_ja: 正当な遡及・概算計上もある。閾値回避の意図の有無を集中度で評価
+    hitl: true
+    references: [監基報240, ACFE]
+  - id: JE-006
+    category: JE
+    name_ja: 決算後の遡及計上
+    description_ja: 決算確定後に遡って当期へ計上された売上
+    assertion: [cutoff, completeness]
+    severity: high
+    base_weight: 24
+    detection_ja: posting timestamp が決算確定後、会計期間は当期
+    applies_to: journal
+    false_positive_notes_ja: 正当な後発事象・修正がある。承認・開示との整合を確認
+    hitl: true
+    references: [監基報240]
+
+  # ===== PATT: パターン・集中・行動 =====
+  - id: PATT-001
+    category: PATT
+    name_ja: 目標ギリギリ達成の反復
+    description_ja: 予算・目標を僅差で達成する期が反復（利益調整の兆候）
+    assertion: [occurrence, cutoff]
+    severity: high
+    base_weight: 20
+    detection_ja: 実績が目標を僅差で上回る期が連続、期末調整と相関
+    applies_to: entity_network
+    false_positive_notes_ja: 優れた予実管理でも僅差達成は起こりうる。期末計上・仕訳との相関で評価
+    hitl: true
+    references: [監基報240]
+  - id: PATT-002
+    category: PATT
+    name_ja: 特定営業担当への異常集中
+    description_ja: 特定営業担当に異常・高リスク取引が偏る
+    assertion: [occurrence]
+    severity: medium
+    base_weight: 14
+    detection_ja: 担当者別の異常フラグ率が外れ値
+    applies_to: salesperson
+    false_positive_notes_ja: 大口担当・特殊商材担当では偏りが正常。担当ポートフォリオを踏まえる（プライバシー配慮）
+    hitl: false
+    references: [ACFE]
+  - id: PATT-003
+    category: PATT
+    name_ja: 四半期末・期末への取引集中
+    description_ja: 取引が四半期末・期末に構造的に集中
+    assertion: [cutoff]
+    severity: medium
+    base_weight: 14
+    detection_ja: 期末付近の計上比率が恒常的に高い
+    applies_to: transaction
+    false_positive_notes_ja: 決算期の商習慣・予算消化で集中する業界がある。業界特性で補正
+    hitl: false
+    references: [監基報240]
+  - id: PATT-004
+    category: PATT
+    name_ja: 得意先/製品集中が期末のみ突出
+    description_ja: 平時と異なる集中が期末にのみ現れる
+    assertion: [cutoff, occurrence]
+    severity: medium
+    base_weight: 16
+    detection_ja: 期末の得意先/製品集中度が平時から乖離
+    applies_to: transaction
+    false_positive_notes_ja: 季節性・キャンペーンで正当に生じる。要因分解して実需と照合
+    hitl: false
+    references: [監基報240]
+  - id: PATT-005
+    category: PATT
+    name_ja: 趨勢・季節性からの乖離
+    description_ja: 売上が趨勢・季節性モデルから有意に乖離
+    assertion: [occurrence, completeness]
+    severity: medium
+    base_weight: 14
+    detection_ja: 予測区間外の売上スパイク/ディップ
+    applies_to: transaction
+    false_positive_notes_ja: 事業構造変化・新規事業で乖離が正常。要因を確認して評価
+    hitl: false
+    references: [監基報240]
+
+  # ===== COMPL: コンプライアンス =====
+  - id: COMPL-001
+    category: COMPL
+    name_ja: 契約獲得に絡む高額コミッション
+    description_ja: 受注獲得に紐づく高額な仲介手数料・コミッション（贈収賄の兆候）
+    assertion: [occurrence, presentation]
+    severity: high
+    base_weight: 22
+    detection_ja: 特定受注に高率手数料、仲介者の実体・受益者が不明
+    applies_to: transaction
+    false_positive_notes_ja: 正当な販売代理・成功報酬もある。役務の実在・料率の合理性・受益者を確認
+    hitl: true
+    references: [不正競争防止法, FCPA]
+  - id: COMPL-002
+    category: COMPL
+    name_ja: 制裁対象・仕向地規制への売上
+    description_ja: 制裁対象国・規制対象仕向地への売上（外為法・輸出管理）
+    assertion: [occurrence, presentation]
+    severity: critical
+    base_weight: 34
+    detection_ja: 仕向地/最終需要者が制裁・輸出規制リストに該当
+    applies_to: transaction
+    false_positive_notes_ja: 許可取得済・非該当判定済の取引は適法。ライセンス・該非判定の有無を確認
+    hitl: true
+    references: [外為法, 輸出管理]
+  - id: COMPL-003
+    category: COMPL
+    name_ja: 価格協調・談合の兆候
+    description_ja: 競合と一致する価格・入札パターン（独禁法リスク）
+    assertion: [presentation]
+    severity: high
+    base_weight: 20
+    detection_ja: 入札・価格の不自然な一致、市場分割の兆候
+    applies_to: transaction
+    false_positive_notes_ja: 市場競争の結果としての価格収束もある。合意の存在を示す状況証拠と併せて評価
+    hitl: true
+    references: [独禁法]
+  - id: COMPL-004
+    category: COMPL
+    name_ja: 不審な販売代理店・仲介者
+    description_ja: 実体・受益者が不明な代理店/仲介者を経由する取引
+    assertion: [occurrence, presentation]
+    severity: high
+    base_weight: 22
+    detection_ja: 仲介者の登記/実体/受益者が不明、リスク国に所在
+    applies_to: customer
+    false_positive_notes_ja: 正当な代理店網もある。デューデリジェンス記録・実体で判断
+    hitl: true
+    references: [AML, 不正競争防止法]
+  - id: COMPL-005
+    category: COMPL
+    name_ja: 公務員・政府系顧客への異例条件
+    description_ja: 公務員・政府系顧客への異例な条件・便益供与
+    assertion: [occurrence, presentation]
+    severity: high
+    base_weight: 22
+    detection_ja: 政府系顧客への通常外の値引/便益/接待の紐付け
+    applies_to: transaction
+    false_positive_notes_ja: 正当な公共調達もある。調達手続の適正性・便益の性質を確認
+    hitl: true
+    references: [不正競争防止法, FCPA]
+
+# ===== スコアリング =====
+risk_scoring:
+  method_ja: |
+    各明細のリスクスコアは、発火した全ルールの base_weight を severity 係数で調整して合算し、
+    ML 異常スコア（0-100 に正規化）と重み付き統合する。上限 100。
+    critical ルールが1つでも発火した場合は、スコアに関わらず高リスクとして人間レビュー対象に含める。
+  severity_multiplier:
+    low: 0.5
+    medium: 1.0
+    high: 1.5
+    critical: 2.0
+  rule_ml_blend:
+    rule_weight: 0.6
+    ml_weight: 0.4
+  notes_ja: 重みは初期値。運用データ（確定/棄却の実績）でキャリブレーションする。モデルリスク管理の対象。
+
+thresholds:
+  high: 70          # ファネルの選別ライン。これ以上をエージェント深掘り・人間レビュー対象とする
+  medium: 40
+  low: 0
+  critical_override_ja: critical severity のルール発火は閾値に関わらずレビュー対象
+  assertion_gate_ja: |
+    occurrence（実在性）と cutoff（期間帰属）は収益の最重要アサーション。
+    これらに紐づく high 以上の所見は、閾値未満でもサンプルとしてレビューに含めることを推奨。

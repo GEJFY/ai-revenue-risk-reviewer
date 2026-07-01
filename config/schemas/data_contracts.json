@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "売上リスク分析 データ契約",
+  "description": "モジュール間 I/O の型定義。すべての受け渡しはこのスキーマに準拠する。売上の期間帰属（カットオフ）分析のため、受注・出荷・検収・請求・収益認識の各日付を分離して保持する点が本ドメインの要。",
+  "definitions": {
+    "SalesTransaction": {
+      "type": "object",
+      "description": "分析対象の売上取引明細。受注→出荷→検収→請求→収益認識→入金 のライフサイクルを1レコードで追跡する。",
+      "required": ["transaction_id", "entity_id", "period", "customer_id", "revenue_recognition_date", "amount", "currency"],
+      "properties": {
+        "transaction_id": { "type": "string", "description": "取引の一意キー" },
+        "entity_id": { "type": "string", "description": "計上した法人。循環取引・関連当事者のネットワーク分析に必須" },
+        "period": { "type": "string", "description": "会計期間（例 2025-Q4, FY2025-M09）。カットオフ判定の基準" },
+        "customer_id": { "type": "string" },
+        "customer_name": { "type": "string" },
+        "product_id": { "type": "string" },
+        "product_name": { "type": "string" },
+        "salesperson_id": { "type": "string", "description": "営業担当。担当者別パターン分析に使用" },
+        "channel": { "type": "string", "enum": ["direct", "distributor", "agent", "online", "consignment", "other"], "description": "販売形態。consignment/agent は収益認識（総額純額・委託販売）の論点に直結" },
+        "order_id": { "type": "string" },
+        "order_date": { "type": "string", "format": "date" },
+        "shipment_id": { "type": "string" },
+        "ship_date": { "type": "string", "format": "date", "description": "出荷日。収益認識日より後なら未出荷計上の疑い" },
+        "delivery_date": { "type": "string", "format": "date", "description": "納品・検収日。支配移転（履行義務充足）の代理指標" },
+        "invoice_id": { "type": "string" },
+        "invoice_date": { "type": "string", "format": "date" },
+        "revenue_recognition_date": { "type": "string", "format": "date", "description": "収益認識日。カットオフ判定の主軸" },
+        "revenue_account": { "type": "string", "description": "計上した売上勘定コード" },
+        "quantity": { "type": "number" },
+        "unit_price": { "type": "number" },
+        "amount": { "type": "number", "description": "計上金額（認識額）" },
+        "currency": { "type": "string" },
+        "gross_net_indicator": { "type": "string", "enum": ["principal_gross", "agent_net", "unknown"], "description": "本人（総額）/代理人（純額）。トップライン水増しの論点" },
+        "performance_obligation_status": { "type": "string", "enum": ["satisfied_point_in_time", "satisfied_over_time", "not_satisfied", "unknown"], "description": "履行義務の充足状態。not_satisfied での認識は前倒し計上の疑い" },
+        "contract_id": { "type": "string", "description": "契約参照。裏契約・変動対価・複数履行義務の検証に使用" },
+        "payment_terms_days": { "type": "integer", "description": "支払サイト。異常延長は回収リスク/押し込みの兆候" },
+        "credit_limit": { "type": "number" },
+        "credit_used": { "type": "number" },
+        "return_flag": { "type": "boolean", "description": "返品・取消の有無" },
+        "credit_memo_ref": { "type": "string", "description": "対応する赤伝の参照" },
+        "reversal_date": { "type": "string", "format": "date", "description": "取消・返品の計上日。期末計上→翌期取消の検出に使用" },
+        "related_party_flag": { "type": "boolean", "description": "関連当事者取引か" },
+        "source_system": { "type": "string", "enum": ["system_generated", "manual", "interface", "unknown"], "description": "手動計上はトップサイド調整の疑い（統制無効化）" },
+        "approver_id": { "type": "string" },
+        "data_quality": {
+          "type": "object",
+          "description": "取込時のデータ品質フラグ。欠損は分析の限界として所見に付す",
+          "properties": {
+            "missing_fields": { "type": "array", "items": { "type": "string" } },
+            "reconciled_to_gl": { "type": "boolean", "description": "総勘定元帳との突合済みか（全件主張の裏付け）" }
+          }
+        }
+      }
+    },
+    "RiskFinding": {
+      "type": "object",
+      "description": "エージェント/エンジンが生成する所見。財務諸表アサーションへの紐付けと根拠が必須。AIは確定できない。",
+      "required": ["finding_id", "transaction_ids", "risk_score", "assertion", "rationale", "hitl_status", "created_by"],
+      "properties": {
+        "finding_id": { "type": "string" },
+        "transaction_ids": { "type": "array", "items": { "type": "string" }, "description": "対象取引（複数可。循環取引は複数取引にまたがる）" },
+        "entity_ids": { "type": "array", "items": { "type": "string" } },
+        "rule_ids": { "type": "array", "items": { "type": "string" }, "description": "発火したルールID" },
+        "ml_scores": {
+          "type": "object",
+          "properties": {
+            "anomaly_score": { "type": "number" },
+            "model_id": { "type": "string" },
+            "shap_top": { "type": "array", "items": { "type": "object", "properties": { "feature": { "type": "string" }, "contribution": { "type": "number" } } }, "description": "スコアへの寄与要因上位。根拠なきスコアは禁止" }
+          }
+        },
+        "risk_score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "assertion": {
+          "type": "array",
+          "description": "リスクに晒される財務諸表アサーション（会計監査の言語）",
+          "items": { "type": "string", "enum": ["occurrence", "completeness", "accuracy", "cutoff", "classification", "valuation", "rights_obligations", "presentation"] }
+        },
+        "rationale": {
+          "type": "object",
+          "description": "所見の根拠。説明可能性の必須要件",
+          "required": ["summary_ja"],
+          "properties": {
+            "summary_ja": { "type": "string" },
+            "rule_violations": { "type": "array", "items": { "type": "string" } },
+            "evidence_refs": { "type": "array", "items": { "type": "string" }, "description": "Evidence.evidence_id の参照" }
+          }
+        },
+        "hypothesis_ja": { "type": "string", "description": "エージェントが立てた仮説（何が起きていそうか）" },
+        "recommended_review_ja": { "type": "string", "description": "推奨される確認手続。助言表現に限定し、是正指示は含めない" },
+        "hitl_status": { "type": "string", "enum": ["open", "in_review", "confirmed", "dismissed"], "description": "AIは open/in_review までしか設定できない。confirmed/dismissed は人間のみ" },
+        "created_by": { "type": "string", "enum": ["rule_engine", "ml_model", "agent"], "description": "生成主体。人間による確定とは区別する" }
+      }
+    },
+    "Evidence": {
+      "type": "object",
+      "description": "エージェントが収集した外部証憑。すべて read-only。出所・法的基盤・インジェクション検査結果を保持する。",
+      "required": ["evidence_id", "finding_id", "type", "source", "provenance", "read_only", "collected_at"],
+      "properties": {
+        "evidence_id": { "type": "string" },
+        "finding_id": { "type": "string" },
+        "type": { "type": "string", "enum": ["shipment_confirmation", "delivery_proof", "customer_confirmation", "contract_terms", "bank_receipt", "corporate_registry", "sanctions_screening", "related_party_registry", "price_master", "communication", "network_path", "other"] },
+        "source": { "type": "string", "description": "取得元システム/API" },
+        "provenance": { "type": "string", "description": "取得経路・クエリの記録（再現性）" },
+        "legal_basis": { "type": "string", "description": "個人データ・通信を含む場合の取得根拠（従業員/取引先データの適法性）" },
+        "collected_at": { "type": "string", "format": "date-time" },
+        "read_only": { "type": "boolean", "const": true },
+        "injection_flags": { "type": "array", "items": { "type": "string" }, "description": "証憑コンテンツ内に検出された埋め込み命令等の疑い。通信・OCR由来は特に注意" },
+        "content_summary_ja": { "type": "string" }
+      }
+    },
+    "AuditLogEntry": {
+      "type": "object",
+      "description": "改ざん不能の監査ログ。WORM＋ハッシュチェーン。エージェントの全行動と所見の状態変化を記録する。",
+      "required": ["seq", "timestamp", "actor", "action", "hash", "prev_hash"],
+      "properties": {
+        "seq": { "type": "integer", "description": "連番。欠番は改ざんの兆候" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "actor": { "type": "string", "description": "human:<id> / agent / system のいずれか" },
+        "action": { "type": "string", "description": "例 tool_call, evidence_collected, finding_created, hitl_decision" },
+        "target": { "type": "string" },
+        "inputs_hash": { "type": "string", "description": "入力のハッシュ（内容は保持せず参照可能性のみ）" },
+        "prev_hash": { "type": "string", "description": "直前エントリの hash。連結して鎖を成す" },
+        "hash": { "type": "string", "description": "本エントリのハッシュ。1件でも改ざんすると以降の鎖が壊れる" },
+        "worm": { "type": "boolean", "const": true }
+      }
+    }
+  }
+}
