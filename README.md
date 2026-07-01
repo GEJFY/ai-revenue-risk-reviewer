@@ -59,6 +59,44 @@
 4. `docs/` が仕様、`config/` が機械可読の定義。コードは未実装（＝自由に生成させる前提のスケルトン）。
 5. **定石**: 不確実な設計や複数ファイルにまたがる変更は plan mode で計画してからコードへ。変更後はテスト/スキーマ検証で確認。無関係なタスクに移るときは `/clear`。
 
+## 実装（コード）— `src/revenue_risk/`
+
+`docs/` と `config/` が仕様、`src/revenue_risk/` がその実装です。仕様の各レイヤ（L1〜L7）に対応する
+モジュール構成と設計判断は **`docs/implementation.md`** にあります。必須依存は PyYAML / jsonschema / numpy のみ
+（scikit-learn・shap・networkx は任意。無ければフォールバックで全機能が動きます）。
+
+```bash
+pip install -r requirements.txt
+
+python run.py demo                    # 合成不正18シナリオを混入→検出力(recall=18/18)を実演
+python run.py demo --out out/         # 統合レポート(JSON)・経営者/監査役サマリ(MD)・明細(CSV)・監査ログを出力
+python run.py run --input data.csv --approve G0 G1
+python run.py check-config            # config/ の整合性チェック
+python run.py verify-audit out/audit_log.json   # 監査ログのハッシュチェーン検証（checkpoint 照合）
+
+python -m unittest discover -t . -s tests       # テスト（95件）
+```
+
+実装が絶対原則（アサーション紐付け・HITL・改ざん不能ログ・インジェクション耐性・コスト・ファネル）を
+満たすことは、`tests/` の検出力(recall)・監査ログ整合性・HITL不変条件・インジェクション検出の各テストが自動確認します。
+
+### 実装リポジトリ構成
+
+```
+src/revenue_risk/
+├── contracts/      # データ契約（4型＋JSON Schema検証）
+├── etl/            # L1 取込（GL突合・連番/欠番・データ品質）
+├── engines/        # L2 ルール / L3 探索 / L4 ML / L5 ネットワーク
+├── agent/          # L6 5フェーズループ・read-onlyコネクタ・HITL・インジェクション防御
+├── audit/          # WORM＋ハッシュチェーン監査ログ
+├── reporting/      # L7 レポート（JSON/MD/CSV）
+├── synthetic/      # 合成不正データ生成（検出力評価）
+├── scoring.py / funnel.py / findings.py / pipeline.py / cli.py
+config/engagement.yaml            # 独立性・配備レイヤ・強制アクション・HITL・上限
+config/rules/detection_params.yaml # 調整可能な検知しきい値
+tests/                             # 95テスト（契約・各エンジン・監査・インジェクション・HITL・e2e・回帰）
+```
+
 ## ファイル一覧
 
 | パス | 役割 |
