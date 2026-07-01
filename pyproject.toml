@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "revenue-risk-reviewer"
+version = "0.1.0"
+description = "売上・収益リスク分析 自律AIエージェント — ルール／ML／ネットワーク分析とHITLを統合した監査実務グレードの検出エンジン"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "goyos" }]
+dependencies = [
+    "PyYAML>=6.0",
+    "jsonschema>=4.0",
+    "numpy>=1.24",
+]
+
+# 追加で入れると精度・機能が上がる任意依存（無くても動く）:
+#   scikit-learn : Isolation Forest / LOF による異常検知（既定は numpy フォールバック）
+#   shap         : ML所見の寄与要因（既定は標準化偏差ベースの近似寄与）
+#   networkx     : 大規模ネットワーク分析（既定は同梱の DFS サイクル検出）
+[project.optional-dependencies]
+ml = ["scikit-learn>=1.3", "shap>=0.44"]
+network = ["networkx>=3.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+revenue-risk = "revenue_risk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

@@ -1,0 +1,122 @@
+# 検知パラメータ（ルール評価の調整可能な数値しきい値）
+#
+# 設計方針: rule_catalog.yaml がルールの「存在・アサーション・severity・base_weight・誤検知注記」
+# を宣言的に持ち、本ファイルは検知ロジックが読む「調整可能な数値」を rule_id ごとに持つ。
+# 検知の述語（predicate）自体はコード（engines/detectors.py）にあるが、しきい値をここに外出しする
+# ことで、監査人・モデルリスク管理がコードを触らず較正でき、変更履歴も追える。
+# 欠けている rule_id はコード側の既定値で評価される。
+
+version: "1.0"
+
+# 期間末の判定に使う共通パラメータ
+period_end:
+  # 「期末最終N営業日」の N（暦日で近似）。CUTOFF-001/JE-002 等が参照
+  last_n_days: 5
+  # 翌期初「M日以内」の M。CUTOFF-004/RETURN-001 等が参照
+  next_m_days: 10
+
+rules:
+  CUTOFF-001:
+    # 期末最終数日の1日あたり計上額が、当期日次平均の何倍を超えたら発火するか
+    concentration_ratio: 3.0
+  CUTOFF-004:
+    # 期末計上→翌期取消。翌期 M 日以内に reversal/credit_memo があれば発火
+    next_m_days: 10
+  CUTOFF-006:
+    # 期末月売上が季節性調整後トレンドの標準偏差の何倍を超えたら発火
+    zscore: 2.5
+  FICT-002:
+    # 新設・初回取引先の判定日数（初回取引からの経過日）と金額の上位分位
+    new_customer_days: 90
+    amount_quantile: 0.9
+  FICT-003:
+    # 収益認識から入金確認までの許容日数（超過＝入金なしの疑い）
+    no_receipt_days: 120
+  FICT-005:
+    # 期末大口計上後に取引が途絶える判定。金額の上位分位
+    amount_quantile: 0.9
+  CIRC-001:
+    # 関連当事者取引の単価/粗利が第三者分布からの乖離（zscore）
+    price_zscore: 2.0
+  CIRC-003:
+    # 資金循環の閉路でネット資金移動が「僅少」とみなす比率（総額に対する残差比）
+    net_residual_ratio: 0.1
+    max_cycle_days: 90
+  CIRC-004:
+    # 介在業者のスルー取引: 粗利が僅少とみなす率、入出荷の日数差上限
+    thin_margin_rate: 0.03
+    reversal_days: 30
+  CIRC-006:
+    # ネットワーク・サイクル検出のホップ上限（engagement.yaml でも上限を持つ）
+    max_hops: 4
+  RECOG-006:
+    # 変動対価の計上乖離（返品実績率に対する引当の乖離許容）
+    variance_tolerance: 0.5
+  RETURN-001:
+    # 期末計上ロットの翌期返品率が全体平均の何倍を超えたら発火
+    cohort_multiple: 2.0
+  RETURN-002:
+    # 赤伝・値引の発生日と計上日の期またぎ乖離（日数）
+    lag_days: 15
+  RETURN-003:
+    # 得意先別返品率の外れ値（zscore）
+    zscore: 2.5
+  RETURN-004:
+    # 値引率がマスタ/契約条件を超過とみなす率、時系列急増の倍率
+    max_discount_rate: 0.3
+    surge_multiple: 2.0
+  PRICE-001:
+    # 単価がマスタ許容レンジ（±rate）を外れたら発火
+    master_tolerance: 0.2
+  PRICE-002:
+    # 数量の外れ値（zscore）。負値は常に発火
+    zscore: 4.0
+  PRICE-003:
+    # 粗利率が製品/得意先クラスタ分布から乖離（zscore）。unit_cost が必要
+    margin_zscore: 2.5
+  PRICE-004:
+    # 承認外の大幅値引（率）。承認レコードなし
+    max_discount_rate: 0.3
+  PRICE-005:
+    # ベンフォード適合度検定の有意水準（カイ二乗 p 値）と最小サンプル数
+    p_value: 0.05
+    min_sample: 300
+  CREDIT-001:
+    # 与信限度超過（credit_used + amount > credit_limit）は率の緩衝なし。例外承認で除外
+    buffer_rate: 0.0
+  CREDIT-002:
+    # 得意先別 DSO の急増（前期比の増加日数）
+    dso_increase_days: 30
+  CREDIT-004:
+    # 支払サイトの異常延長（日数）
+    max_payment_terms_days: 180
+  CUST-002:
+    # マスタ変更（口座/住所）と直後の高額取引が近接する日数
+    change_proximity_days: 30
+    amount_quantile: 0.9
+  CUST-004:
+    # 上位得意先の売上構成比の急上昇（前期比のポイント増）
+    concentration_jump: 0.15
+  JE-002:
+    # 決算日近接の手動売上仕訳（決算日から N 日以内）
+    near_close_days: 5
+  JE-005:
+    # 丸め・閾値直下の判定。丸めの底（この倍数にぴったり）と閾値直下の帯
+    round_base: 100000
+    threshold_band: 0.02
+  PATT-001:
+    # 目標僅差達成（達成率が 100%〜(100%+band) に収まる期の連続数）
+    proximity_band: 0.03
+    min_consecutive: 3
+  PATT-002:
+    # 担当者別の異常フラグ率の外れ値（zscore）
+    zscore: 2.5
+  PATT-003:
+    # 期末付近への計上集中比率がこの水準を恒常的に超える
+    concentration_ratio: 0.4
+  PATT-005:
+    # 趨勢・季節性からの乖離（zscore）
+    zscore: 2.5
+  COMPL-001:
+    # 高額コミッションの料率しきい値（受注額比）
+    commission_rate: 0.15

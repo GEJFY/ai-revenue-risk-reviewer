@@ -687,7 +687,7 @@ rules:
     assertion: [occurrence, accuracy]
     severity: medium
     base_weight: 16
-    detection_ja: 入力日<計上日、極端な丸め、閾値直下への集中
+    detection_ja: 入力日>計上日（後から過去日付で計上＝バックデート）、極端な丸め、承認閾値直下への集中
     applies_to: journal
     false_positive_notes_ja: 正当な遡及・概算計上もある。閾値回避の意図の有無を集中度で評価
     hitl: true
