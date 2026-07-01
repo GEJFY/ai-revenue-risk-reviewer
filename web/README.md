@@ -32,7 +32,26 @@ python scripts/generate_narration.py
 python -m http.server -d web 8080   # http://localhost:8080/
 ```
 
-## ガイドデモ（ナレーション付き自動再生）
+## デモ動画（ナレーション付き MP4）
+
+`web/demo/demo.mp4` に、各画面を自動操作・遷移しながらアニメーションカーソル・ハイライト・字幕・
+**ニューラルTTS音声**で解説する 11 ステップのウォークスルー（H.264/AAC・1600×900）を同梱しています。
+
+再録画（UIやデータを変えた後）:
+
+```bash
+pip install edge-tts playwright imageio-ffmpeg
+python -m playwright install-deps            # 既存の Edge/Chrome を channel で使用（大きなDL不要）
+python scripts/build_demo_data.py            # データ更新時のみ
+python scripts/generate_narration.py         # 文面変更時のみ（音声再生成）
+python scripts/record_demo_video.py          # web/demo/demo.mp4 を再生成
+```
+
+Playwright は導入済みの Microsoft Edge（`channel=msedge`）を利用し、ffmpeg は `imageio-ffmpeg` 同梱の
+バイナリを使うため、別途 ffmpeg のインストールは不要です。各ステップは「先頭無音＋ナレーション長」だけ
+表示し、同一音声を同期して重ねるため、映像と音声は厳密に一致します。
+
+## ガイドデモ（ブラウザ内・ナレーション付き自動再生）
 
 右上の「ガイド再生」ボタン、または `index.html?demo=1` で自動再生。各画面を自動で操作・遷移しながら、
 アニメーションカーソル・ハイライト・字幕・音声で解説します（11ステップ）。

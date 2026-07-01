@@ -24,6 +24,8 @@ dependencies = [
 ml = ["scikit-learn>=1.3", "shap>=0.44"]
 network = ["networkx>=3.0"]
 dev = ["pytest>=7.0"]
+# デモ動画・ナレーションの生成に使用（ランタイムには不要）
+demo = ["edge-tts>=6.1", "playwright>=1.40", "imageio-ffmpeg>=0.4"]
 
 [project.scripts]
 revenue-risk = "revenue_risk.cli:main"

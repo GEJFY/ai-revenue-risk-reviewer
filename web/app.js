@@ -5,7 +5,7 @@
   const D = window.DEMO_DATA || {};
   const SEV = ["critical", "high", "medium", "low"];
   const SEV_JA = { critical: "重大", high: "高", medium: "中", low: "低" };
-  const SEV_COLOR = { critical: "#b42318", high: "#c2410c", medium: "#a16207", low: "#475467" };
+  const SEV_COLOR = { critical: "#9a2a22", high: "#a4560f", medium: "#5f6b7a", low: "#98a2b3" };
   const ROLE_JA = { "rule_engine": "ルール", "ml_model": "ML", "agent": "エージェント", "system": "システム" };
 
   // ---- ユーティリティ ----
@@ -14,7 +14,7 @@
   const yen = (n) => "¥" + Math.round(Number(n || 0)).toLocaleString("ja-JP");
   const num = (n) => Number(n || 0).toLocaleString("ja-JP");
   const pct = (n, d = 1) => (Number(n || 0) * 100).toFixed(d) + "%";
-  const shortHash = (h) => h ? (h.slice(0, 8) + "…") : "—";
+  const shortHash = (h) => h ? h.slice(0, 10) : "—";
   const assertName = (a) => (D.assertion_names && D.assertion_names[a]) || a;
   const catName = (c) => (D.category_names && D.category_names[c]) || c;
   const ruleName = (id) => (D.rules && D.rules[id] && D.rules[id].name_ja) || id;
@@ -34,61 +34,68 @@
     return e;
   }
   function sevBadge(sev) {
-    if (!sev) return `<span class="badge sev-low"><span class="dot"></span>—</span>`;
-    return `<span class="badge sev-${sev}"><span class="dot"></span>${SEV_JA[sev] || sev}</span>`;
+    if (!sev) return `<span class="sev sev-low">—</span>`;
+    return `<span class="sev sev-${sev}">${SEV_JA[sev] || sev}</span>`;
   }
-  function scorePill(score) {
+  function scoreCell(score) {
     const s = Math.round(Number(score || 0));
-    const col = s >= 70 ? "#b42318" : s >= 40 ? "#c2410c" : "#667085";
-    return `<span class="score-pill"><span class="score-bar"><span style="width:${s}%;background:${col}"></span></span><span style="color:${col}">${s}</span></span>`;
+    const col = s >= 70 ? "var(--sev-critical)" : s >= 40 ? "var(--sev-high)" : "var(--muted)";
+    return `<div class="score"><span class="score-num">${s}</span><span class="score-bar"><span style="width:${s}%;background:${col}"></span></span></div>`;
+  }
+  function statusEl(s) {
+    const map = { open: ["未着手", "open"], in_review: ["レビュー中", "in_review"], confirmed: ["確定（人間）", "confirmed"], dismissed: ["棄却（人間）", "dismissed"] };
+    const [t, c] = map[s] || [s, "open"];
+    return `<span class="status ${c}"><span class="dot"></span><span class="label">${t}</span></span>`;
   }
 
   // ---- SVGチャート ----
-  function donut(segments, size = 132) {
+  function donut(segments, size = 128) {
     const total = segments.reduce((a, s) => a + s.value, 0) || 1;
-    const r = size / 2 - 12, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r;
+    const r = size / 2 - 10, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r, sw = 13;
     let off = 0;
     const rings = segments.filter(s => s.value > 0).map(s => {
       const len = (s.value / total) * C;
-      const el = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="18"
-        stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cy})" stroke-linecap="butt"/>`;
+      const el = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}"
+        stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cy})"/>`;
       off += len; return el;
     }).join("");
-    const sel = segments.reduce((a, s) => a + s.value, 0);
     return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="重要度別内訳">
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#eef1f4" stroke-width="18"/>${rings}
-      <text x="${cx}" y="${cy - 3}" text-anchor="middle" font-size="26" font-weight="720" fill="#10192a">${sel}</text>
-      <text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10.5" fill="#667085">所見</text></svg>`;
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#eef0f3" stroke-width="${sw}"/>${rings}
+      <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="24" font-weight="700" fill="#14181f" style="font-variant-numeric:tabular-nums">${total}</text>
+      <text x="${cx}" y="${cy + 14}" text-anchor="middle" font-size="10" fill="#6b7480">所見</text></svg>`;
   }
+  // 横棒: 値ラベルを右端固定カラムに整列、ラベル列境界に基線ヘアライン、rx=0。
   function hbars(items, opts) {
     opts = opts || {};
     const max = Math.max(1, ...items.map(i => i.value));
-    const rowH = 30, w = opts.width || 460, labelW = opts.labelW || 150, barW = w - labelW - 54;
-    const svgH = items.length * rowH + 6;
+    const rowH = 26, w = opts.width || 460, labelW = opts.labelW || 138, valW = 42;
+    const barW = w - labelW - valW - 10;
+    const svgH = items.length * rowH + 4;
+    const baseline = `<line x1="${labelW}" y1="0" x2="${labelW}" y2="${svgH - 4}" stroke="#e6e8ec"/>`;
     const rows = items.map((it, i) => {
-      const y = i * rowH + 4, bw = Math.max(2, (it.value / max) * barW);
+      const y = i * rowH + 3, bw = Math.max(1, (it.value / max) * barW);
       return `<g>
-        <text x="0" y="${y + 15}" font-size="12" fill="#384358">${esc(it.label)}</text>
-        <rect x="${labelW}" y="${y + 5}" width="${barW}" height="14" rx="4" fill="#f2f4f7"/>
-        <rect x="${labelW}" y="${y + 5}" width="${bw}" height="14" rx="4" fill="${it.color || "#0e7c7b"}"/>
-        <text x="${labelW + barW + 8}" y="${y + 16}" font-size="12" font-weight="600" fill="#10192a">${num(it.value)}</text></g>`;
+        <text x="0" y="${y + 12}" font-size="12" fill="#3b4453">${esc(it.label)}</text>
+        <rect x="${labelW + 1}" y="${y + 3}" width="${barW}" height="9" fill="#f0f2f5"/>
+        <rect x="${labelW + 1}" y="${y + 3}" width="${bw}" height="9" fill="${it.color || "#0f6b64"}"/>
+        <text x="${w}" y="${y + 12}" text-anchor="end" font-size="12" font-weight="600" fill="#14181f" style="font-variant-numeric:tabular-nums">${num(it.value)}</text></g>`;
     }).join("");
-    return `<svg class="chart" viewBox="0 0 ${w} ${svgH}" width="100%" height="${svgH}" role="img">${rows}</svg>`;
+    return `<svg class="chart" viewBox="0 0 ${w} ${svgH}" width="100%" height="${svgH}" role="img">${baseline}${rows}</svg>`;
   }
   function funnelChart(total, deterministic, selected) {
-    const w = 540, h = 158, cx = w / 2, maxW = 470;
-    // 幅は段階的に固定（視覚的なファネル）。件数はラベルに実数で表示。
+    const w = 540, h = 140, cx = w / 2, maxW = 470;
+    // 幅は視覚的な段階表現（面積は厳密比ではない旨をキャプションで明記）。件数は実数。
     const stages = [
-      { label: `全取引（母集団）：${num(total)} 件`, ratio: 1.0, color: "#c7d0dd", fg: "#0c1523" },
-      { label: `決定論的スコアリング：${num(total)} 件`, ratio: 0.66, color: "#7fb5b2", fg: "#08302f" },
-      { label: `高リスク選別：${num(selected)} 件`, ratio: 0.4, color: "#0e7c7b", fg: "#ffffff" },
+      { label: `全取引（母集団）　${num(total)}`, ratio: 1.0, fill: "#e2e5ea", fg: "#14181f" },
+      { label: `決定論的スコアリング　${num(total)}`, ratio: 0.62, fill: "#c3c9d2", fg: "#14181f" },
+      { label: `高リスク選別　${num(selected)}`, ratio: 0.34, fill: "#0f6b64", fg: "#ffffff" },
     ];
-    let y = 12;
+    let y = 8;
     const parts = stages.map(s => {
-      const bw = maxW * s.ratio, x = cx - bw / 2, bh = 36;
-      const seg = `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="7" fill="${s.color}"/>
-        <text x="${cx}" y="${y + 23}" text-anchor="middle" font-size="12.5" font-weight="650" fill="${s.fg}">${esc(s.label)}</text>`;
-      y += bh + 11; return seg;
+      const bw = maxW * s.ratio, x = cx - bw / 2, bh = 32;
+      const seg = `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="${s.fill}"/>
+        <text x="${cx}" y="${y + 20}" text-anchor="middle" font-size="12.5" font-weight="600" fill="${s.fg}" style="font-variant-numeric:tabular-nums">${esc(s.label)}</text>`;
+      y += bh + 8; return seg;
     }).join("");
     return `<svg class="chart" viewBox="0 0 ${w} ${h}" width="100%" height="auto" role="img" aria-label="ファネル：全取引から高リスク選別へ">${parts}</svg>`;
   }
@@ -126,11 +133,11 @@
     const pop = D.population, fn = D.funnel, bd = D.breakdown, dq = D.data_quality, ex = D.exploratory, ag = D.agent;
     const sevSeg = SEV.map(s => ({ label: SEV_JA[s], value: (bd.by_severity[s] || 0), color: SEV_COLOR[s] })).filter(s => s.value);
     const assertItems = Object.entries(bd.by_assertion || {}).sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => ({ label: assertName(k), value: v, color: "#0e7c7b" }));
+      .map(([k, v]) => ({ label: assertName(k), value: v, color: "#0f6b64" }));
     const catCounts = {};
     (D.findings || []).forEach(f => (f.rule_ids || []).forEach(r => { const c = r.split("-")[0]; catCounts[c] = (catCounts[c] || 0) + 1; }));
     const catItems = Object.entries(catCounts).sort((a, b) => b[1] - a[1]).slice(0, 8)
-      .map(([k, v]) => ({ label: catName(k), value: v, color: "#5a6b7f" }));
+      .map(([k, v]) => ({ label: catName(k), value: v, color: "#5f6b7a" }));
     const recon = dq.reconciled_to_gl;
 
     const kpis = [
@@ -145,20 +152,21 @@
     const cards = h("div", { class: "cards", "data-demo": "kpis" });
     kpis.forEach(k => cards.appendChild(h("div", {
       class: "card kpi", html: `
+      <span class="eyebrow">${esc(k.label)}</span>
       <div class="icon">${k.icon}</div>
-      <h3>${esc(k.label)}</h3>
-      <div class="value" style="${k.ok ? "color:#067647" : ""}">${k.value}${k.unit ? `<span class="unit">${k.unit}</span>` : ""}</div>
-      <div class="delta">${esc(k.sub)}</div>` })));
+      <div class="value${k.ok ? " ok" : ""}">${k.value}${k.unit ? `<span class="unit">${k.unit}</span>` : ""}</div>
+      <div class="sub">${esc(k.sub)}</div>` })));
     view.appendChild(cards);
 
     // ファネル + 重要度ドーナツ
     const row1 = h("div", { class: "grid", style: "grid-template-columns: 1.5fr 1fr;" });
     row1.appendChild(h("div", { class: "card pad-lg", "data-demo": "funnel", html: `
-      <div class="section-title" style="margin:0 0 8px"><h2>コスト・ファネル（全件 → 高リスク）</h2></div>
-      <p class="small muted" style="margin:0 0 6px">全件を決定論的（ルール／ML／ネットワーク）に低コストで評価し、高リスク部分集合のみをエージェントが深掘りします。</p>
-      ${funnelChart(fn.total, fn.total, fn.selected)}` }));
+      <div class="section-title"><h2>コスト・ファネル（全件 → 高リスク）</h2></div>
+      <p class="small muted" style="margin:0 0 12px">全件を決定論的（ルール／ML／ネットワーク）に低コストで評価し、高リスク部分集合のみをエージェントが深掘りします。</p>
+      ${funnelChart(fn.total, fn.total, fn.selected)}
+      <p class="small muted" style="margin:12px 0 0">高リスク選別は全件の ${pct(fn.selection_rate, 2)}。図の幅は視覚的表現で、面積は厳密な比率ではありません。</p>` }));
     const donutCard = h("div", { class: "card", html: `
-      <div class="section-title" style="margin:0 0 6px"><h2>重要度別</h2></div>
+      <div class="section-title"><h2>重要度別</h2></div>
       <div style="display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap">
         <div class="chart">${donut(sevSeg)}</div>
         <div class="legend" style="flex-direction:column;gap:8px">
@@ -171,43 +179,43 @@
     // アサーション + カテゴリ
     const row2 = h("div", { class: "grid", style: "grid-template-columns: 1fr 1fr;" });
     row2.appendChild(h("div", { class: "card", "data-demo": "assertions", html: `
-      <div class="section-title" style="margin:0 0 10px"><h2>財務諸表アサーション別</h2><span class="hint">監査人が検証すべき論点に紐づけ</span></div>
+      <div class="section-title"><h2>財務諸表アサーション別</h2><span class="hint">監査人が検証すべき論点に紐づけ</span></div>
       ${hbars(assertItems, { labelW: 130 })}` }));
     row2.appendChild(h("div", { class: "card", html: `
-      <div class="section-title" style="margin:0 0 10px"><h2>リスクカテゴリ別（上位）</h2></div>
+      <div class="section-title"><h2>リスクカテゴリ別（上位）</h2></div>
       ${hbars(catItems, { labelW: 150 })}` }));
     view.appendChild(row2);
 
     // データ品質 + エージェント + 検証
     const row3 = h("div", { class: "grid", style: "grid-template-columns: 1fr 1fr 1fr;" });
     row3.appendChild(h("div", { class: "card", "data-demo": "dq", html: `
-      <div class="section-title" style="margin:0 0 10px"><h2>データ品質（全件主張の裏付け）</h2></div>
+      <div class="section-title"><h2>データ品質（全件主張の裏付け）</h2></div>
       <dl class="kv">
-        <dt>GL突合</dt><dd>${recon ? `<span class="badge pill-ok"><span class="dot"></span>一致</span>` : `<span class="badge pill-warn">要確認</span>`}</dd>
-        <dt>連番の欠番</dt><dd>${num(dq.sequence_gaps.length)} 件</dd>
-        <dt>連番の重複</dt><dd>${num(dq.sequence_duplicates.length)} 件</dd>
+        <dt>GL突合</dt><dd>${recon ? `<span class="status confirmed"><span class="dot"></span><span class="label">一致</span></span>` : `<span class="status in_review"><span class="dot"></span><span class="label">要確認</span></span>`}</dd>
+        <dt>連番の欠番</dt><dd class="num">${num(dq.sequence_gaps.length)} 件</dd>
+        <dt>連番の重複</dt><dd class="num">${num(dq.sequence_duplicates.length)} 件</dd>
         <dt>期間網羅</dt><dd>${(pop.period_coverage || []).length} 期間（欠落 ${num((dq.missing_periods || []).length)}）</dd>
-        <dt>スキーマ不適合</dt><dd>${num(dq.invalid_count)} 件</dd>
+        <dt>スキーマ不適合</dt><dd class="num">${num(dq.invalid_count)} 件</dd>
       </dl>` }));
     row3.appendChild(h("div", { class: "card", html: `
-      <div class="section-title" style="margin:0 0 10px"><h2>エージェント探索（read-only）</h2></div>
+      <div class="section-title"><h2>エージェント探索（read-only）</h2></div>
       <dl class="kv">
-        <dt>証憑ツール呼出</dt><dd>${num(ag.tool_calls)} 回</dd>
-        <dt>HITLゲート抑止</dt><dd>${num(ag.gated_skips)} 回</dd>
-        <dt>インジェクション検出</dt><dd>${ag.injections_detected ? `<span class="badge pill-warn">${num(ag.injections_detected)} 件</span>` : "0 件"}</dd>
-        <dt>証憑と一次データの矛盾</dt><dd>${ag.contradictions_detected ? `<span class="badge pill-warn">${num(ag.contradictions_detected)} 件</span>` : "0 件"}</dd>
+        <dt>証憑ツール呼出</dt><dd class="num">${num(ag.tool_calls)} 回</dd>
+        <dt>HITLゲート抑止</dt><dd class="num">${num(ag.gated_skips)} 回</dd>
+        <dt>インジェクション検出</dt><dd>${ag.injections_detected ? `<strong style="color:var(--sev-high)">${num(ag.injections_detected)} 件</strong>` : "0 件"}</dd>
+        <dt>証憑と一次データの矛盾</dt><dd>${ag.contradictions_detected ? `<strong style="color:var(--sev-high)">${num(ag.contradictions_detected)} 件</strong>` : "0 件"}</dd>
       </dl>` }));
     const detected = (D.scenarios_detected || []);
     const nDet = detected.filter(d => d.detected).length;
     row3.appendChild(h("div", { class: "card", html: `
-      <div class="section-title" style="margin:0 0 10px"><h2>モデル検証（合成データ）</h2><span class="hint">検証目的</span></div>
-      <div class="value" style="font-size:26px;font-weight:720">${nDet} / ${detected.length}</div>
-      <p class="small muted" style="margin:4px 0 0">本デモに混入した合成不正シナリオの検出状況です。実運用での検出性能を保証・示唆するものではありません。</p>` }));
+      <div class="section-title"><h2>モデル検証（合成データ）</h2><span class="hint">検証目的</span></div>
+      <div style="font-size:26px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${nDet} / ${detected.length}</div>
+      <p class="small muted" style="margin:8px 0 0">本デモに混入した合成不正シナリオの検出状況です。実運用での検出性能を保証・示唆するものではありません。</p>` }));
     view.appendChild(row3);
 
     // 注記
-    view.appendChild(h("div", { class: "callout info", style: "margin-top:6px", html: `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex:none"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+    view.appendChild(h("div", { class: "callout", style: "margin-top:0", html: `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="flex:none;margin-top:2px"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
       <div>${esc(D.meta.disclaimer_ja)}</div>` }));
     return view;
   }
@@ -270,15 +278,16 @@
       const tbody = h("tbody");
       rows.slice(0, 400).forEach(f => {
         const tr = h("tr", { tabindex: "0", role: "button", "aria-label": `${f.finding_id} を開く` });
+        const assertHtml = (f.assertion || []).slice(0, 3).map(a => `<span class="tag assertion">${esc(assertName(a))}</span>`).join(" ") || "—";
         tr.innerHTML = `
           <td class="mono">${esc(f.finding_id)}</td>
           <td>${sevBadge(f.severity)}</td>
-          <td class="num">${scorePill(f.risk_score)}</td>
-          <td>${(f.assertion || []).slice(0, 3).map(a => `<span class="chip assertion">${esc(assertName(a))}</span>`).join(" ") || "—"}</td>
-          <td>${(f.rule_ids || []).slice(0, 3).map(r => `<span class="chip rule">${esc(r)}</span>`).join(" ")}${(f.rule_ids || []).length > 3 ? ` <span class="small muted">+${f.rule_ids.length - 3}</span>` : ""}</td>
-          <td><span class="small muted">${ROLE_JA[f.created_by] || f.created_by}</span></td>
-          <td>${hitlBadge(f.hitl_status)}</td>
-          <td>${f.selected_for_deepdive ? `<span class="badge pill-ok"><span class="dot"></span>深掘り</span>` : `<span class="small muted">—</span>`}</td>`;
+          <td>${scoreCell(f.risk_score)}</td>
+          <td><div style="display:flex;gap:4px;flex-wrap:wrap">${assertHtml}</div></td>
+          <td class="rules-cell">${(f.rule_ids || []).slice(0, 3).map(esc).join(", ")}${(f.rule_ids || []).length > 3 ? ` <span class="more">+${f.rule_ids.length - 3}</span>` : ""}</td>
+          <td class="small muted">${ROLE_JA[f.created_by] || f.created_by}</td>
+          <td>${statusEl(f.hitl_status)}</td>
+          <td>${f.selected_for_deepdive ? `<span class="mark-sel" title="深掘り対象"></span>` : `<span class="small muted">—</span>`}</td>`;
         const open = () => navigate("console", f.finding_id);
         tr.addEventListener("click", open);
         tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
@@ -292,11 +301,7 @@
     draw();
     return view;
   }
-  function hitlBadge(s) {
-    const map = { open: ["未着手", "sev-low"], in_review: ["レビュー中", "sev-medium"], confirmed: ["確定(人間)", "sev-high"], dismissed: ["棄却(人間)", "sev-low"] };
-    const [t, c] = map[s] || [s, "sev-low"];
-    return `<span class="badge ${c}">${t}</span>`;
-  }
+  function hitlBadge(s) { return statusEl(s); }
 
   // レビューコンソール（HITL）
   function renderConsole(findingId) {
@@ -307,20 +312,21 @@
     const view = h("div");
 
     // ヘッダ
-    view.appendChild(h("div", { class: "card pad-lg", style: "margin-bottom:16px", html: `
+    view.appendChild(h("div", { class: "card pad-lg", style: "margin-bottom:24px", html: `
       <div class="detail-head">
         <div class="idblock">
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <span class="mono" style="font-size:15px;font-weight:700">${esc(f.finding_id)}</span>
-            ${sevBadge(f.severity)} ${hitlBadge(f.hitl_status)}
-            ${f.selected_for_deepdive ? `<span class="badge pill-ok"><span class="dot"></span>深掘り対象</span>` : ""}
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <span class="mono" style="font-size:15px;font-weight:600;letter-spacing:0">${esc(f.finding_id)}</span>
+            ${sevBadge(f.severity)} ${statusEl(f.hitl_status)}
+            ${f.selected_for_deepdive ? `<span class="tag">深掘り対象</span>` : ""}
           </div>
-          <p style="margin:8px 0 0;color:#384358">${esc(f.rationale && f.rationale.summary_ja || "")}</p>
+          <p style="margin:12px 0 0;color:var(--ink-2);max-width:60ch">${esc(f.rationale && f.rationale.summary_ja || "")}</p>
         </div>
-        <div style="text-align:right">
-          <div class="small muted">リスクスコア</div>
-          <div style="font-size:30px;font-weight:730;color:${f.risk_score >= 70 ? "#b42318" : "#c2410c"}">${Math.round(f.risk_score)}</div>
-          <div class="small muted">生成: ${ROLE_JA[f.created_by] || f.created_by}</div>
+        <div style="text-align:right;min-width:120px">
+          <div class="eyebrow">リスクスコア</div>
+          <div style="font-size:28px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin:4px 0 2px;color:${f.risk_score >= 70 ? "var(--sev-critical)" : "var(--sev-high)"}">${Math.round(f.risk_score)}</div>
+          <div class="small muted">統合（ルール＋ML＋NW）</div>
+          <div class="small muted" style="margin-top:6px">生成: ${ROLE_JA[f.created_by] || f.created_by}</div>
         </div>
       </div>` }));
 
@@ -329,7 +335,7 @@
     // 左: 取引の事実 + カットオフ・タイムライン + ルール
     const left = h("div", { class: "grid" });
     left.appendChild(h("div", { class: "card", html: `
-      <div class="section-title" style="margin:0 0 10px"><h2>取引の事実</h2></div>
+      <div class="section-title"><h2>取引の事実</h2></div>
       <dl class="kv">
         <dt>取引ID</dt><dd class="mono">${esc(tid)}</dd>
         <dt>計上法人</dt><dd>${esc(t.entity_id || "—")}</dd>
@@ -341,17 +347,17 @@
         <dt>計上区分</dt><dd>${esc(t.source_system || "—")}${t.poster_role ? `（起票: ${esc(t.poster_role)}）` : ""}</dd>
       </dl>` }));
     left.appendChild(h("div", { class: "card", "data-demo": "timeline", html: `
-      <div class="section-title" style="margin:0 0 6px"><h2>日付の三角照合（カットオフ）</h2><span class="hint">受注→出荷→検収→計上の整合</span></div>
+      <div class="section-title"><h2>日付の三角照合（カットオフ）</h2><span class="hint">受注→出荷→検収→計上の整合</span></div>
       ${timeline(t)}` }));
     left.appendChild(h("div", { class: "card", html: `
-      <div class="section-title" style="margin:0 0 10px"><h2>発火ルールとアサーション</h2></div>
+      <div class="section-title"><h2>発火ルールとアサーション</h2></div>
       ${(f.rule_ids || []).map(rid => {
       const r = (D.rules || {})[rid] || {};
-      return `<div style="padding:9px 0;border-bottom:1px solid #eef1f4">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <span class="chip rule">${esc(rid)}</span> <strong style="font-size:13px">${esc(r.name_ja || "")}</strong> ${sevBadge(r.severity)}
-          </div>
-          <div style="margin-top:5px">${(r.assertion || []).map(a => `<span class="chip assertion">${esc(assertName(a))}</span>`).join(" ")}</div>
+      return `<div class="rule-row">
+          <span class="tag rule">${esc(rid)}</span>
+          <span class="rname">${esc(r.name_ja || "")}</span>
+          ${sevBadge(r.severity)}
+          <span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:auto">${(r.assertion || []).map(a => `<span class="tag assertion">${esc(assertName(a))}</span>`).join("")}</span>
         </div>`;
     }).join("") || `<p class="small muted">ルール発火なし（ML由来）</p>`}` }));
     grid.appendChild(left);
@@ -359,36 +365,42 @@
     // 右: ML寄与 + 仮説 + 証憑 + 推奨 + HITL
     const right = h("div", { class: "grid" });
     if (f.ml_scores && f.ml_scores.shap_top && f.ml_scores.shap_top.length) {
-      const items = f.ml_scores.shap_top.map(s => ({ label: featJa(s.feature), value: Math.round(s.contribution * 100) / 100, color: "#6941c6" }));
+      const items = f.ml_scores.shap_top.map(s => ({ label: featJa(s.feature), value: Math.round(s.contribution * 100) / 100, color: "#5f6b7a" }));
       right.appendChild(h("div", { class: "card", html: `
-        <div class="section-title" style="margin:0 0 8px"><h2>ML異常スコアと寄与要因</h2><span class="hint">説明可能性（SHAP）</span></div>
-        <div class="small muted" style="margin-bottom:6px">異常スコア <strong style="color:#6941c6">${Math.round(f.ml_scores.anomaly_score)}</strong> / 100 ・ モデル ${esc(f.ml_scores.model_id || "")}</div>
-        ${hbars(items, { labelW: 160 })}` }));
+        <div class="section-title"><h2>ML異常スコアと寄与要因</h2><span class="hint">説明可能性（SHAP）</span></div>
+        <div class="small muted" style="margin-bottom:12px">異常スコア <strong style="color:var(--ink)">${Math.round(f.ml_scores.anomaly_score)}</strong> / 100 ・ モデル <span class="mono">${esc(f.ml_scores.model_id || "")}</span></div>
+        ${hbars(items, { labelW: 150 })}
+        <p class="small muted" style="margin:10px 0 0">上位3特徴の寄与度（robust-σ）。0–100 のスコアは高いほど要調査。</p>` }));
     }
     if (f.hypothesis_ja) right.appendChild(h("div", { class: "card", html: `
-      <div class="section-title" style="margin:0 0 8px"><h2>エージェントの仮説</h2></div>
+      <div class="section-title"><h2>エージェントの仮説</h2></div>
       <p style="margin:0;color:#384358">${esc(f.hypothesis_ja)}</p>` }));
 
     const evCard = h("div", { class: "card", "data-demo": "evidence" });
-    evCard.innerHTML = `<div class="section-title" style="margin:0 0 10px"><h2>収集証憑（read-only）</h2><span class="hint">${ev.length} 件</span></div>`;
-    if (!ev.length) evCard.appendChild(h("p", { class: "small muted" }, "この所見に対する外部証憑の収集はありません（ファネル非選別、またはHITL未承認）。"));
-    ev.forEach(e => {
-      const inj = (e.injection_flags || []).length > 0;
-      evCard.appendChild(h("div", {
-        class: "evidence-item" + (inj ? " injection" : ""), html: `
-        <div class="evidence-head">
-          <strong style="font-size:12.5px">${esc(evTypeJa(e.type))}</strong>
-          <span class="chip">${esc(e.source || "")}</span>
-          ${inj ? `<span class="badge pill-warn" style="margin-left:auto"><span class="dot"></span>インジェクション疑い</span>` : `<span class="small muted" style="margin-left:auto">read-only</span>`}
-        </div>
-        ${e.content_summary_ja ? `<div class="evidence-content">${esc(e.content_summary_ja)}</div>` : ""}
-        ${inj ? `<div class="small" style="margin-top:6px;color:#912018">検出フラグ: ${esc((e.injection_flags || []).join(", "))} — 命令として実行せず、リスク評価を維持しています。</div>` : ""}
-        ${e.legal_basis ? `<div class="small muted" style="margin-top:5px">法的基盤: ${esc(e.legal_basis)}</div>` : ""}
-      ` }));
-    });
+    evCard.innerHTML = `<div class="section-title"><h2>収集証憑</h2><span class="hint">read-only ・ ${ev.length} 件</span></div>`;
+    if (!ev.length) {
+      evCard.appendChild(h("p", { class: "small muted" }, "この所見に対する外部証憑の収集はありません（ファネル非選別、またはHITL未承認）。"));
+    } else {
+      const list = h("div", { class: "evidence-list" });
+      ev.forEach(e => {
+        const inj = (e.injection_flags || []).length > 0;
+        list.appendChild(h("div", {
+          class: "evidence-item" + (inj ? " injection" : ""), html: `
+          <div class="evidence-head">
+            <span class="etype">${esc(evTypeJa(e.type))}</span>
+            <span class="tag">${esc(e.source || "")}</span>
+            ${inj ? `<span class="sev sev-critical" style="margin-left:auto">インジェクション疑い</span>` : `<span class="ro">read-only</span>`}
+          </div>
+          ${e.content_summary_ja ? `<div class="evidence-content">${esc(e.content_summary_ja)}</div>` : ""}
+          ${inj ? `<div class="small" style="margin-top:6px;color:var(--sev-critical)">検出フラグ: ${esc((e.injection_flags || []).join(", "))} — 命令として実行せず、リスク評価を維持しています。</div>` : ""}
+          ${e.legal_basis ? `<div class="small muted" style="margin-top:5px">法的基盤: ${esc(e.legal_basis)}</div>` : ""}
+        ` }));
+      });
+      evCard.appendChild(list);
+    }
     right.appendChild(evCard);
 
-    if (f.recommended_review_ja) right.appendChild(h("div", { class: "callout info", html: `
+    if (f.recommended_review_ja) right.appendChild(h("div", { class: "callout", html: `
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex:none"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
       <div><strong>推奨手続</strong><br>${esc(f.recommended_review_ja)}</div>` }));
 
@@ -397,7 +409,7 @@
     function drawHitl() {
       const status = f.hitl_status;
       hitlCard.innerHTML = `
-        <div class="section-title" style="margin:0 0 8px"><h2>人間による判断（HITL）</h2></div>
+        <div class="section-title"><h2>人間による判断（HITL）</h2></div>
         <div class="callout warn" style="margin-bottom:10px">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex:none"><path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
           <div>確定・棄却は<strong>人間のみ</strong>が行えます。AI（ルール／ML／エージェント）は所見の提示と「レビュー中」までに限られます。</div>
@@ -445,7 +457,7 @@
       }
       return `<div class="tl-item ${flag ? "flag" : ""}">
         <span class="tl-dot"></span>
-        <div><div class="tl-label">${label}${flag ? " ⚠" : ""}</div><div class="tl-date">${esc(d)}</div></div></div>`;
+        <div><div class="tl-label">${esc(label)}${flag ? " ・逸脱" : ""}</div><div class="tl-date">${esc(d)}</div></div></div>`;
     }).join("") + `</div>`;
   }
   function featJa(f) {
@@ -458,44 +470,51 @@
   // 監査証跡
   function renderAudit() {
     const a = D.audit;
+    const ok = a.chain_valid;
     const view = h("div", { class: "grid" });
-    view.appendChild(h("div", { class: `card`, "data-demo": "chain", html: `
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <div style="width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:${a.chain_valid ? "#ecfdf3" : "#fef3f2"};color:${a.chain_valid ? "#067647" : "#b42318"}">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${a.chain_valid ? "M20 6 9 17l-5-5" : "M18 6 6 18M6 6l12 12"}"/></svg>
+    view.appendChild(h("div", { class: "card", "data-demo": "chain", html: `
+      <div style="display:grid;grid-template-columns:auto 1fr auto;column-gap:24px;align-items:center;row-gap:12px">
+        <div style="border-left:3px solid ${ok ? "var(--ok)" : "var(--sev-critical)"};padding-left:14px">
+          <div class="eyebrow">監査ログ整合性</div>
+          <div style="font-size:20px;font-weight:600;letter-spacing:-.01em;margin-top:2px;color:${ok ? "var(--ok)" : "var(--sev-critical)"}">${ok ? "一致（改ざんなし）" : "不整合を検出"}</div>
         </div>
-        <div style="flex:1;min-width:220px">
-          <h2 style="font-size:16px">監査ログ整合性: ${a.chain_valid ? "一致（改ざんなし）" : "不整合を検出"}</h2>
-          <p class="small muted" style="margin:4px 0 0">WORM＋ハッシュチェーン。各エントリは直前のハッシュを含み連結します。1件でも改ざん・欠番・並べ替え・末尾切り詰めがあれば検知されます。</p>
+        <p class="small muted" style="margin:0;max-width:54ch">WORM＋ハッシュチェーン。各エントリは直前のハッシュを含み連結します。1件でも改ざん・欠番・並べ替え・末尾切り詰めがあれば検知されます。</p>
+        <div style="display:flex;gap:28px;text-align:right">
+          <div><div class="eyebrow">エントリ数</div><div class="num" style="font-size:20px;font-weight:600;margin-top:2px">${num(a.total)}</div></div>
+          <div><div class="eyebrow">チェーン長</div><div class="num" style="font-size:20px;font-weight:600;margin-top:2px">${num(a.checkpoint && a.checkpoint.length)}</div></div>
+          <div><div class="eyebrow">末尾ハッシュ</div><div class="mono" style="margin-top:8px">${shortHash(a.checkpoint && a.checkpoint.head_hash)}</div></div>
         </div>
-        <dl class="kv" style="min-width:220px">
-          <dt>エントリ数</dt><dd>${num(a.total)}</dd>
-          <dt>チェーン長（checkpoint）</dt><dd>${num(a.checkpoint && a.checkpoint.length)}</dd>
-          <dt>末尾ハッシュ</dt><dd class="mono">${shortHash(a.checkpoint && a.checkpoint.head_hash)}</dd>
-        </dl>
       </div>` }));
 
-    const wrap = h("div", { class: "table-wrap" });
-    const table = h("table", { class: "data" });
-    table.innerHTML = `<thead><tr><th class="num">seq</th><th>時刻</th><th>主体</th><th>アクション</th><th>対象</th><th>hash</th><th>prev</th></tr></thead>`;
-    const tbody = h("tbody");
     const entries = a.entries.slice(-200);
+    const wrap = h("div", { class: "table-wrap" });
+    wrap.appendChild(h("div", { class: "table-cap", html: `ハッシュチェーン連結ログ<span class="muted">prev（前行のhash）→ hash が連鎖　・　最新 ${entries.length} / 全 ${num(a.total)} エントリ</span>` }));
+    const table = h("table", { class: "data", style: "table-layout:fixed" });
+    table.innerHTML = `<colgroup>
+        <col style="width:52px"><col style="width:104px"><col style="width:112px"><col style="width:120px"><col><col style="width:116px"><col style="width:116px"></colgroup>
+      <thead><tr><th class="num">seq</th><th>時刻</th><th>主体</th><th>アクション</th><th>対象</th><th>prev_hash</th><th>hash</th></tr></thead>`;
+    const tbody = h("tbody");
+    let lastTime = "";
     entries.forEach(e => {
       const role = e.actor.startsWith("human") ? "human" : e.actor;
-      const roleClass = role === "agent" ? "role-agent" : role === "system" ? "role-system" : "role-human";
+      const dotc = role === "agent" ? "var(--accent)" : role === "system" ? "var(--faint)" : "var(--sev-high)";
+      const t = (e.timestamp || "").replace("T", " ").slice(0, 19);
+      const timeCell = t === lastTime
+        ? `<span class="mono small" style="color:var(--faint)">〃 ${esc(t.slice(11))}</span>`
+        : `<span class="mono small">${esc(t)}</span>`;
+      lastTime = t;
       const tr = h("tr", { style: "cursor:default" });
       tr.innerHTML = `<td class="num mono">${e.seq}</td>
-        <td class="small mono">${esc((e.timestamp || "").replace("T", " ").slice(0, 19))}</td>
-        <td><span class="chip ${roleClass}">${esc(ROLE_JA[e.actor] || e.actor)}</span></td>
-        <td>${esc(actionJa(e.action))}</td>
-        <td class="mono small">${esc(e.target || "—")}</td>
-        <td class="mono small">${shortHash(e.hash)}</td>
-        <td class="mono small">${shortHash(e.prev_hash)}</td>`;
+        <td>${timeCell}</td>
+        <td><span class="status"><span class="dot" style="background:${dotc}"></span>${esc(ROLE_JA[e.actor] || e.actor)}</span></td>
+        <td class="small">${esc(actionJa(e.action))}</td>
+        <td class="mono small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.target || "—")}</td>
+        <td class="mono small" style="color:var(--faint)">${shortHash(e.prev_hash)}</td>
+        <td class="mono small">${shortHash(e.hash)}</td>`;
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     wrap.appendChild(table);
-    view.appendChild(h("div", { class: "small muted", style: "margin:-6px 0 4px" }, `最新 ${entries.length} / 全 ${num(a.total)} エントリを表示`));
     view.appendChild(wrap);
     return view;
   }
@@ -507,7 +526,7 @@
   function renderReport() {
     const view = h("div");
     view.appendChild(h("div", { class: "report-md", html: mdToHtml(D.summary_md) }));
-    view.appendChild(h("div", { class: "callout info", style: "max-width:860px;margin-top:16px", html: `
+    view.appendChild(h("div", { class: "callout", style: "max-width:860px;margin-top:16px", html: `
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex:none"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
       <div>本レポートはプロトタイプのデモ出力です。すべて合成データであり、所見はAIによる提示です。確定・是正・通報・開示は独立した人間が判断します。</div>` }));
     return view;
@@ -517,7 +536,7 @@
   let toastT;
   function toast(msg) {
     let el = $("#toast");
-    if (!el) { el = h("div", { id: "toast", style: "position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:#0c1523;color:#fff;padding:12px 18px;border-radius:10px;box-shadow:0 12px 32px rgba(16,24,40,.24);z-index:9997;font-size:13.5px;max-width:520px" }); document.body.appendChild(el); }
+    if (!el) { el = h("div", { id: "toast", style: "position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:#0f1319;color:#fff;padding:12px 18px;border-radius:2px;border-left:3px solid var(--accent);box-shadow:0 12px 40px rgba(15,19,25,.28);z-index:9997;font-size:13px;max-width:520px" }); document.body.appendChild(el); }
     el.textContent = msg; el.style.opacity = "1";
     clearTimeout(toastT); toastT = setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .4s"; }, 3200);
   }
